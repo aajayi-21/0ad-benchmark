@@ -61,6 +61,7 @@ public:
 
 	void SetCamera(const CVector3D& pos, float rotX, float rotY, float zoom);
 	void MoveCameraTarget(const CVector3D& target);
+	void LoadCameraConfig();
 	void ResetCameraTarget(const CVector3D& target);
 	void FollowEntity(entity_id_t entity, bool firstPerson);
 	entity_id_t GetFollowedEntity();

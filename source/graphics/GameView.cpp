@@ -349,6 +349,11 @@ void CGameView::MoveCameraTarget(const CVector3D& target)
 	m->CameraController->MoveCameraTarget(target);
 }
 
+void CGameView::LoadCameraConfig()
+{
+    m->CameraController->LoadConfig();
+}
+
 void CGameView::ResetCameraTarget(const CVector3D& target)
 {
 	m->CameraController->ResetCameraTarget(target);

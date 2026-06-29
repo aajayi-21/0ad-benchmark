@@ -387,6 +387,201 @@
 		]
 	},
 	{
+		"label": "Camera (general)",
+		"tooltip": "Adjust camera behavior and limits",
+		"options": [
+			{
+				"type": "dropdown",
+				"label": "Field of View",
+				"tooltip": "Angular extent of the world that the camera captures.",
+				"config": "view.fov",
+				"function": "LoadCameraConfig",
+				"list": [
+					{ "value": 30, "label": "30°", "tooltip": "Narrow." },
+					{ "value": 45, "label": "45°", "tooltip": "Standard." },
+					{ "value": 60, "label": "60°", "tooltip": "Wide." }
+				]
+			},
+			{
+				"type": "slider",
+				"label": "Scroll Speed",
+				"tooltip": "Adjust camera speed when moving the camera using hotkeys or the screen edge.",
+				"config": "view.scroll.speed",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 1200
+			},
+			{
+				"type": "slider",
+				"label": "Zoom Speed - Key",
+				"tooltip": "Zoom speed when zooming with hotkeys.",
+				"config": "view.zoom.speed",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 800
+			},
+			{
+				"type": "slider",
+				"label": "Zoom Speed - Mouse Wheel",
+				"tooltip": "Zoom speed when using the mouse wheel.",
+				"config": "view.zoom.speed.wheel",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 100
+			},
+			{
+				"type": "slider",
+				"label": "Zoom In Limit",
+				"tooltip": "How far you can zoom the camera in.",
+				"config": "view.zoom.min",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 100
+			},
+			{
+				"type": "slider",
+				"label": "Zoom Out Limit",
+				"tooltip": "How far you can zoom the camera out.",
+				"config": "view.zoom.max",
+				"function": "LoadCameraConfig",
+				"min": 101,
+				"max": 400
+			},
+			{
+				"type": "slider",
+				"label": "Zoom Default",
+				"tooltip": "Default zoom value when starting a new game.",
+				"config": "view.zoom.default",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 400
+			},
+			{
+				"type": "slider",
+				"label": "Rotation Speed - Key",
+				"tooltip": "Rotation speed when using hotkeys.",
+				"config": "view.rotate.y.speed",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 3
+			},
+			{
+				"type": "slider",
+				"label": "Rotation Speed - Mouse Wheel",
+				"tooltip": "Rotation speed when using the mouse wheel.",
+				"config": "view.rotate.y.speed.wheel",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 2
+			},
+			{
+				"type": "slider",
+				"label": "Pitch Minimum",
+				"tooltip": "Minimum camera pitch - at 0° the camera is looking horizontal across the map",
+				"config": "view.rotate.x.min",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 44
+			},
+			{
+				"type": "slider",
+				"label": "Pitch Maximum",
+				"tooltip": "Maximum camera pitch - at 90° the camera is looking down on the map from above.",
+				"config": "view.rotate.x.max",
+				"function": "LoadCameraConfig",
+				"min": 45,
+				"max": 90
+			},
+			{
+				"type": "slider",
+				"label": "Pitch Default",
+				"tooltip": "Default camera pitch.",
+				"config": "view.rotate.x.default",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 90
+			},
+			{
+				"type": "slider",
+				"label": "Pitching Speed",
+				"tooltip": "Camera pitch speed when using hotkeys.",
+				"config": "view.rotate.x.speed",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 3
+			}
+		]
+	},
+	{
+		"label": "Camera (advanced)",
+		"tooltip": "Adjust advanced camera behavior",
+		"options": [
+			{
+				"type": "slider",
+				"label": "Scroll Speed Modifier",
+				"tooltip": "How much to multiplicatively increase/decrease scroll speed with the \"Increase scroll speed\" and \"Decrease scroll speed\" hotkeys.",
+				"config": "view.scroll.speed.modifier",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 2
+			},
+			{
+				"type": "slider",
+				"label": "Scroll Smoothness",
+				"tooltip": "Smoothness for camera scrolling.",
+				"config": "view.pos.smoothness",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 1
+			},
+			{
+				"type": "slider",
+				"label": "Zoom Speed Modifier",
+				"tooltip": "How much to multiplicatively increase/decrease mouse wheel zoom speed with the \"Increase zoom speed\" and \"Decrease zoom speed\" hotkeys.",
+				"config": "view.zoom.speed.modifier",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 2
+			},
+			{
+				"type": "slider",
+				"label": "Zoom Smoothness",
+				"tooltip": "Smoothness for zooming in/out.",
+				"config": "view.zoom.smoothness",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 1
+			},
+			{
+				"type": "slider",
+				"label": "Rotation and Pitch Speed Modifier",
+				"tooltip": "How much to multiplicatively increase/decrease mouse wheel rotation speed with the \"Increase rotation speed\" and \"Decrease rotation speed\" hotkeys.",
+				"config": "view.rotate.speed.modifier",
+				"function": "LoadCameraConfig",
+				"min": 1,
+				"max": 2
+			},
+			{
+				"type": "slider",
+				"label": "Rotation Smoothness",
+				"tooltip": "Smoothness for camera rotation.",
+				"config": "view.rotate.y.smoothness",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 1
+			},
+			{
+				"type": "slider",
+				"label": "Pitch Smoothness",
+				"tooltip": "Smoothness for camera pitch changes.",
+				"config": "view.rotate.x.smoothness",
+				"function": "LoadCameraConfig",
+				"min": 0,
+				"max": 1
+			}
+		]
+	},
+	{
 		"label": "Sound",
 		"tooltip": "Make changes to the sound options.",
 		"options":

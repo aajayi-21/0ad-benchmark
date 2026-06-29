@@ -122,6 +122,16 @@ JS::Value GetCameraPosition(const Script::Request& rq)
 }
 
 /**
+ * Reload camera configuration
+ */
+void LoadCameraConfig()
+{
+    if (!g_Game || !g_Game->GetView())
+        return;
+    g_Game->GetView()->LoadCameraConfig();
+}
+
+/**
  * Move camera to a 2D location.
  */
 void CameraMoveTo(entity_pos_t x, entity_pos_t z)
@@ -209,6 +219,7 @@ void RegisterScriptFunctions(const Script::Request& rq)
 	Script::Function::Register<&GetCameraPivot>(rq, "GetCameraPivot");
 	Script::Function::Register<&GetCameraPosition>(rq, "GetCameraPosition");
 	Script::Function::Register<&CameraMoveTo>(rq, "CameraMoveTo");
+	Script::Function::Register<&LoadCameraConfig>(rq, "LoadCameraConfig");
 	Script::Function::Register<&SetCameraTarget>(rq, "SetCameraTarget");
 	Script::Function::Register<&SetCameraData>(rq, "SetCameraData");
 	Script::Function::Register<&CameraFollow>(rq, "CameraFollow");
