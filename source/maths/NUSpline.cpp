@@ -247,6 +247,8 @@ void TNSpline::RemoveNode(const int index)
 	if (m_NodeCount == 0 || index > m_NodeCount - 1)
 		return;
 
+	if (index > 0)
+		std::swap(m_Nodes[index].Distance, m_Nodes[index - 1].Distance);
 	m_MaxDistance -= m_Nodes[index].Distance;
 	m_Nodes.erase(m_Nodes.begin() + index);
 	--m_NodeCount;
