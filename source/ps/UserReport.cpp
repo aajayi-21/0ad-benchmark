@@ -449,7 +449,8 @@ private:
 			self->m_RequestDataOffset += amount;
 		}
 
-		self->SetStatus("sending:" + CStr::FromDouble((double)self->m_RequestDataOffset / self->m_RequestData.size()));
+		self->SetStatus(fmt::format("sending:{:L}",
+			static_cast<double>(self->m_RequestDataOffset) / self->m_RequestData.size()));
 
 		return amount;
 	}

@@ -280,9 +280,9 @@ void SendNetworkFlare(JS::HandleValue position)
 	// (TODO?): Converting the doubles into strings here is a workaround because direct (de)serialisation of floating point numbers is not supported.
 	// It causes somewhat awkward message handling, but the resulting efficiency losses are negligible.
 	g_NetClient->SendFlareMessage(
-		CStr::FromDouble(positionX.toNumber()),
-		CStr::FromDouble(positionY.toNumber()),
-		CStr::FromDouble(positionZ.toNumber())
+		fmt::format("{}", positionX.toNumber()),
+		fmt::format("{}", positionY.toNumber()),
+		fmt::format("{}", positionZ.toNumber())
 	);
 }
 

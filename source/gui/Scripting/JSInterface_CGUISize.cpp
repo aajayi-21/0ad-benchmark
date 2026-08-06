@@ -81,10 +81,10 @@ bool SetCRectField(JSContext* cx, unsigned argc, JS::Value* vp)
 }
 
 // Produces "10", "-10", "50%", "50%-10", "50%+10", etc
-CStr ToPercentString(double pix, double per)
+std::string ToPercentString(double pix, double per)
 {
 	if (per == 0)
-		return CStr::FromDouble(pix);
+		return fmt::format("{}", pix);
 
 	if (pix == 0)
 		return fmt::format("{}%", per);
@@ -97,7 +97,7 @@ bool toString(JSContext* cx, uint argc, JS::Value* vp)
 	JS::CallArgs args{JS::CallArgsFromVp(argc, vp)};
 	JS::RootedObject obj{cx, &args.thisv().toObject()};
 	CGUISimpleSetting<CGUISize>* wrapper{JS::GetMaybePtrFromReservedSlot<CGUISimpleSetting<CGUISize>>(obj, Script::Interface::JSObjectReservedSlots::PRIVATE)};
-	CStr buffer;
+	std::string buffer;
 
 	buffer += ToPercentString(wrapper->GetMutable().pixel.left, wrapper->GetMutable().percent.left) + " ";
 	buffer += ToPercentString(wrapper->GetMutable().pixel.top, wrapper->GetMutable().percent.top) + " ";

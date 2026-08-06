@@ -106,18 +106,21 @@ bool JSI_GUISize::construct(JSContext* cx, uint argc, JS::Value* vp)
 }
 
 // Produces "10", "-10", "50%", "50%-10", "50%+10", etc
-CStr JSI_GUISize::ToPercentString(double pix, double per)
+std::string JSI_GUISize::ToPercentString(double pix, double per)
 {
 	if (per == 0)
-		return CStr::FromDouble(pix);
+		return fmt::format("{}", pix);
 
-	return CStr::FromDouble(per)+"%"+(pix == 0.0 ? CStr() : pix > 0.0 ? CStr("+")+CStr::FromDouble(pix) : CStr::FromDouble(pix));
+	if (pix == 0.0)
+		return fmt::format("{}%", per);
+
+	return fmt::format("{}%{:+}", per, pix);
 }
 
 bool JSI_GUISize::toString(JSContext* cx, uint argc, JS::Value* vp)
 {
 	JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-	CStr buffer;
+	std::string buffer;
 
 	Script::Request rq(cx);
 	double val, valr;

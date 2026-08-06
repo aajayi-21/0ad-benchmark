@@ -200,15 +200,6 @@ CStr CStr::Repeat(const CStr& str, size_t reps)
 	return ret;
 }
 
-// Construction from numbers:
-
-CStr CStr::FromDouble(double n)
-{
-	tstringstream<StrBase> ss;
-	ss << n;
-	return ss.str();
-}
-
 // Conversion to numbers:
 
 int CStr::ToInt() const

@@ -21,7 +21,8 @@
 
 #include "lib/posix/posix_types.h"
 #include "lib/types.h"
-#include "ps/CStr.h"
+
+#include <string>
 
 namespace JS { class Value; }
 namespace Script { class Interface; }
@@ -43,7 +44,7 @@ namespace JSI_GUISize
 	bool construct(JSContext* cx, uint argc, JS::Value* vp);
 	bool toString(JSContext* cx, uint argc, JS::Value* vp);
 
-	CStr ToPercentString(double pix, double per);
+	std::string ToPercentString(double pix, double per);
 }
 
 #endif // INCLUDED_JSI_GUISIZE

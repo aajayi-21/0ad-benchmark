@@ -95,8 +95,6 @@ public:
 
 	// Conversions:
 
-	static CStr FromDouble(double n);
-
 	/**
 	 * Return CStr as Integer.
 	 * Conversion is from the beginning of CStr.
