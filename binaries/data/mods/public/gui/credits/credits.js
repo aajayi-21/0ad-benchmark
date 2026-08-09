@@ -8,6 +8,7 @@ var g_OrderTabNames = [
 	"audio",
 	"maps",
 	"history",
+	"encylopedia",
 	"balancing",
 	"community",
 	"translators",
@@ -94,7 +95,8 @@ function parseHelper(list)
 					credit = element.nick;
 				else if (element.name)
 					credit = element.name;
-
+				else if (element.text)
+					credit = element.text;
 				if (credit)
 					result += setStringTags(credit + "\n", { "font": "sans-14" });
 			}
