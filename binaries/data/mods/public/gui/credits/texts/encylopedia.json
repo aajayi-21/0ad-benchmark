@@ -2,9 +2,16 @@
 	"Title": "Encylopedia & Writings",
 	"Content": [
 		{
+			"Title": "Ruins",
+			"List": [
+			    { "nick": "ShadowOfHassen", "name": "Nathanael K. Stottlemyer" }
+			]
+		},
+		{
 			"Title": "Treasures",
 			"List": [
-				{ "text":" Nathanael K. Stottlemyer - ShadowOfHassen. Refrenced \"Usborn Illustrated Guide to Greek Myths & Legends\" by Cheryl Evans & Dr. Anne, published November 2007 " }
+			    { "nick": "ShadowOfHassen", "name": "Nathanael K. Stottlemyer" },
+				{ "reference":" \"Usborn Illustrated Guide to Greek Myths & Legends\" by Cheryl Evans & Dr. Anne, published November 2007 " }
 			]
 		}
 	]

@@ -8,6 +8,9 @@
     <Civ>gaia</Civ>
     <SpecificName>Capitoline Wolf</SpecificName>
     <Icon>gaia/geology_metal.png</Icon>
+    <History>
+        A metal statue depicting a wolf who, according to legend, nursed Romulus and Remus, the brothers who built Rome.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="14.0" depth="8.0"/>

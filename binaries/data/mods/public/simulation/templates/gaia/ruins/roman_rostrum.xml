@@ -6,6 +6,9 @@
   </Footprint>
   <Identity>
     <SpecificName>Roman Rostrum</SpecificName>
+    <History>
+        A rostrum such as this one would be used in the period of the Roman Republic for senators to give speeches.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="34.0" depth="16.0"/>

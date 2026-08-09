@@ -7,6 +7,9 @@
   <Identity>
     <SpecificName>Discobolus</SpecificName>
     <Icon>gaia/geology_metal.png</Icon>
+    <History>
+        This is a metal reproduction of the Discobolus, a famous statue made by the Greek artist Myron. It depicts a Greek athlete throwing a discus.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="7.0" depth="7.0"/>

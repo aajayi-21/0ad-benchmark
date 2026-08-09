@@ -8,6 +8,9 @@
     <Civ>gaia</Civ>
     <SpecificName>Caryatid Statue</SpecificName>
     <Icon>gaia/geology_metal.png</Icon>
+    <History>
+        This is a Caryatid, a carved statue that is used as a column to support a building. it is now freestanding and its metal could be used for something nice, maybe some swords?
+    </History>
   </Identity>
   <Obstruction>
     <Static depth="4.0" width="4.0"/>

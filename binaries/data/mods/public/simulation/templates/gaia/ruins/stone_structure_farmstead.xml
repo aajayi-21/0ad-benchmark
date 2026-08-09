@@ -9,6 +9,9 @@
     <GenericName>Stone Resource</GenericName>
     <SpecificName>Ruined Farmstead</SpecificName>
     <Icon>gaia/geology_stone_1.png</Icon>
+    <History>
+       A house once stood here. Now, however, there are only the remains of its foundation. What had destroyed it? Invaders perhaps? Or maybe just the force of nature gradually taking its toll? Whatever the cause of its destruction, the remaining stone can be reclaimed.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="14" depth="17"/>

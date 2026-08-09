@@ -7,6 +7,9 @@
   <Identity>
     <SpecificName>Poseidon</SpecificName>
     <Icon>gaia/geology_metal.png</Icon>
+    <History>
+        A metal statue of Poseidon, the greek god of the sea. It is a nice statue, but could be also turned into some metal for one of your own projects.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="7.0" depth="7.0"/>

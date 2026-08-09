@@ -8,6 +8,9 @@
     <Civ>gaia</Civ>
     <SpecificName>Apollo</SpecificName>
     <Icon>gaia/geology_metal.png</Icon>
+    <History>
+        A metal statue of the greek god Apollo. It is a nice statue, but could be also turned into metal for one of your own projects.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="7.0" depth="7.0"/>

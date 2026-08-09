@@ -6,6 +6,9 @@
   </Footprint>
   <Identity>
     <SpecificName>Lamassu Statue</SpecificName>
+    <History>
+        A stone statue of the Mesopotamian deity, Lamassu. While it looks nice, you could probably use the stone for something better.
+    </History>
   </Identity>
   <Obstruction>
     <Static width="3.5" depth="3.5"/>

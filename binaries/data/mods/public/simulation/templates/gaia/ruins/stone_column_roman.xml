@@ -6,6 +6,9 @@
   </Footprint>
   <Identity>
     <SpecificName>Roman Column</SpecificName>
+    <History>
+        A stone column as those found in Roman buildings.
+    </History>
   </Identity>
   <ResourceSupply>
     <Max>400</Max>

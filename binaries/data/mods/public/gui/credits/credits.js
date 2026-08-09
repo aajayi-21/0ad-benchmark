@@ -95,8 +95,8 @@ function parseHelper(list)
 					credit = element.nick;
 				else if (element.name)
 					credit = element.name;
-				else if (element.text)
-					credit = element.text;
+				else if (element.reference)
+					credit = element.reference;
 				if (credit)
 					result += setStringTags(credit + "\n", { "font": "sans-14" });
 			}
