@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -1051,7 +1051,7 @@ ICmpObstruction::EFoundationCheck CCmpPathfinder::CheckBuildingPlacement(const I
 		i16 j = span.j;
 
 		// Fail if any span extends outside the grid
-		if (i0 < 0 || i1 > m_TerrainOnlyGrid->m_W || j < 0 || j > m_TerrainOnlyGrid->m_H)
+		if (i0 < 0 || i1 > m_TerrainOnlyGrid->m_W || j < 0 || j >= m_TerrainOnlyGrid->m_H)
 			return ICmpObstruction::FOUNDATION_CHECK_FAIL_TERRAIN_CLASS;
 
 		// Fail if any span includes an impassable tile
