@@ -925,7 +925,6 @@ std::vector<CFixedVector2D> CCmpPathfinder::DistributeAround(std::vector<entity_
 	std::vector<CFixedVector2D> unitPositions;
 	unitPositions.reserve(units.size());
 
-	CmpPtr<ICmpPosition> cmpPosition(GetSystemEntity());
 	for (entity_id_t unit : units)
 	{
 		CmpPtr<ICmpPosition> unitPos(GetSimContext(), unit);
