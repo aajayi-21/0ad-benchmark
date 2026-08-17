@@ -1259,4 +1259,73 @@ function TestAttackGroupBehavior()
 	})();
 }
 
+function TestGatherFindingNewTargetRespectsQueuedReturnResource()
+{
+	ResetState();
+	const ent = 10;
+	const gatherTarget = 20;
+	const queuedDropsite = 30;
+
+	const resourceType = { "generic": "food", "specific": "grain" };
+
+	AddMock(SYSTEM_ENTITY, IID_Timer, {
+		"SetInterval": () => {},
+		"SetTimeout": () => {}
+	});
+	AddMock(ent, IID_Position, {
+		"IsInWorld": () => true
+	});
+	AddMock(ent, IID_ResourceGatherer, {
+		"IsCarrying": (type) => type == resourceType.generic,
+		"AddToPlayerCounter": () => {},
+		"RemoveFromPlayerCounter": () => {},
+		"GetLastCarriedType": () => resourceType,
+		"StartGathering": () => true,
+		"StopGathering": () => {}
+	});
+
+	const unitAI = ConstructComponent(ent, "UnitAI", {
+		"FormationController": "false",
+		"DefaultStance": "aggressive",
+		"FleeDistance": 10
+	});
+	unitAI.OnCreate();
+
+	unitAI.order = {
+		"type": "Gather",
+		"data": {
+			"force": false,
+			"target": gatherTarget,
+			"type": resourceType,
+			"template": "gaia/fruit/grain"
+		}
+	};
+	unitAI.orderQueue = [
+		unitAI.order,
+		{ "type": "ReturnResource", "data": { "target": queuedDropsite, "force": false } }
+	];
+
+	let dropsiteLookups = 0;
+	unitAI.FindNearestDropsite = () => { ++dropsiteLookups; return 999; };
+
+	unitAI.CheckTargetRange = () => true;
+	unitAI.UnitFsm.Init(unitAI, "INDIVIDUAL.GATHER.GATHERING");
+	TS_ASSERT_EQUALS(unitAI.GetCurrentState(), "INDIVIDUAL.GATHER.GATHERING");
+
+	// Simulates the target running out: matches ResourceGatherer.PerformGather,
+	// which sends this same message on the same condition.
+	unitAI.CheckTargetRange = () => false;
+	unitAI.AbleToMove = () => true;
+	unitAI.MoveTo = () => true;
+	unitAI.ProcessMessage("TargetInvalidated", null);
+
+	TS_ASSERT_EQUALS(dropsiteLookups, 0);
+	TS_ASSERT_EQUALS(unitAI.orderQueue.length, 1);
+	TS_ASSERT_EQUALS(unitAI.order.type, "ReturnResource");
+	TS_ASSERT_EQUALS(unitAI.order.data.target, queuedDropsite);
+	TS_ASSERT_EQUALS(unitAI.GetCurrentState(), "INDIVIDUAL.RETURNRESOURCE.APPROACHING");
+}
+
+TestGatherFindingNewTargetRespectsQueuedReturnResource();
+
 TestAttackGroupBehavior();

@@ -2918,7 +2918,7 @@ UnitAI.prototype.UnitFsmSpec = {
 					// but first check what is our next order and, if needed, insert a returnResource order
 					const cmpResourceGatherer = Engine.QueryInterface(this.entity, IID_ResourceGatherer);
 					if (cmpResourceGatherer.IsCarrying(resourceType.generic) &&
-						this.orderQueue.length > 1 && this.orderQueue[1] !== "ReturnResource" &&
+						this.orderQueue.length > 1 && this.orderQueue[1].type !== "ReturnResource" &&
 						(this.orderQueue[1].type !== "Gather" || this.orderQueue[1].data.type.generic !== resourceType.generic))
 					{
 						const nearestDropsite = this.FindNearestDropsite(resourceType.generic);
