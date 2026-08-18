@@ -1312,15 +1312,17 @@ public:
 		if (!isMirage && q.interface && !GetSimContext().GetComponentManager().QueryInterface(id, q.interface))
 			return false;
 
-		// Filter hidden entities when we want mirages (i.e., we care about visibility)
+		// Filter hidden entities when we want mirages (i.e., we care about visibility).
 		if (q.preferMirages && q.source.GetId() != INVALID_ENTITY)
 		{
-			// Look up the source's current owner
+			// Look up the source's current owner.
 			EntityMap<EntityData>::const_iterator itSource = m_EntityData.find(q.source.GetId());
 			if (itSource != m_EntityData.end())
 			{
 				player_id_t sourceOwner = itSource->second.owner;
-				if (sourceOwner != INVALID_PLAYER)
+				// Gaia and observers have no slot in the visibility mask (GetPlayerVisibility
+				// would report HIDDEN for everything); the whole map is visible to them anyway.
+				if (sourceOwner > 0)
 				{
 					LosVisibility vis = GetPlayerVisibility(entity.visibilities, sourceOwner);
 					if (vis == LosVisibility::HIDDEN)

@@ -395,6 +395,67 @@ public:
 		rangeManager->DestroyActiveQuery(query2);
 	}
 
+	// Gaia has no slot in the per-player visibility mask, but the whole map is
+	// revealed to it: a Gaia-owned source must not have its results filtered out.
+	void test_range_queries_gaia_source_visibility()
+	{
+		ComponentTestHelper test(*g_ScriptContext);
+
+		ICmpRangeManager* rangeManager = test.Add<ICmpRangeManager>(CID_RangeManager, "", SYSTEM_ENTITY);
+
+		MockVisionRgm vision, vision2;
+		MockPositionRgm position, position2;
+		MockObstructionRgm obs(fixed::Zero()), obs2(fixed::Zero());
+		test.AddMock(100, IID_Vision, vision);
+		test.AddMock(100, IID_Position, position);
+		test.AddMock(100, IID_Obstruction, obs);
+
+		test.AddMock(101, IID_Vision, vision2);
+		test.AddMock(101, IID_Position, position2);
+		test.AddMock(101, IID_Obstruction, obs2);
+
+		rangeManager->SetBounds(entity_pos_t::FromInt(0), entity_pos_t::FromInt(0), entity_pos_t::FromInt(512), entity_pos_t::FromInt(512));
+		{ CMessageCreate msg(100); rangeManager->HandleMessage(msg, false); }
+		{ CMessageCreate msg(101); rangeManager->HandleMessage(msg, false); }
+
+		// A Gaia animal (100) hunting a player-owned unit (101).
+		{ CMessageOwnershipChanged msg(100, -1, 0); rangeManager->HandleMessage(msg, false); }
+		{ CMessageOwnershipChanged msg(101, -1, 1); rangeManager->HandleMessage(msg, false); }
+
+		auto move = [&rangeManager](entity_id_t ent, MockPositionRgm& pos, fixed x, fixed z) {
+			pos.m_Pos = CFixedVector3D(x, fixed::Zero(), z);
+			{ CMessagePositionChanged msg(ent, true, x, z, entity_angle_t::Zero()); rangeManager->HandleMessage(msg, false); }
+		};
+
+		move(100, position, fixed::FromInt(10), fixed::FromInt(10));
+		move(101, position2, fixed::FromInt(10), fixed::FromInt(15));
+
+		const std::vector<int> owners{ 1 };
+
+		// The query UnitAI uses to find attack targets: flat, mirage-aware.
+		ICmpRangeManager::tag_t query = rangeManager->CreateActiveQuery(
+			100, fixed::FromInt(0), fixed::FromInt(50), owners, 0,
+			rangeManager->GetEntityFlagMask("normal"), true, true);
+		rangeManager->EnableActiveQuery(query);
+
+		{ CMessageUpdate msg(fixed::FromInt(1)); rangeManager->HandleMessage(msg, false); }
+		std::vector<entity_id_t> nearby = rangeManager->ResetActiveQuery(query);
+		TS_ASSERT_EQUALS(nearby, std::vector<entity_id_t>{101});
+
+		// Same for the parabolic variant.
+		ICmpRangeManager::tag_t parabolicQuery = rangeManager->CreateActiveParabolicQuery(
+			100, fixed::FromInt(0), fixed::FromInt(50), fixed::FromInt(20), fixed::Zero(),
+			owners, 0, rangeManager->GetEntityFlagMask("normal"), true);
+		rangeManager->EnableActiveQuery(parabolicQuery);
+
+		{ CMessageUpdate msg(fixed::FromInt(1)); rangeManager->HandleMessage(msg, false); }
+		nearby = rangeManager->ResetActiveQuery(parabolicQuery);
+		TS_ASSERT_EQUALS(nearby, std::vector<entity_id_t>{101});
+
+		rangeManager->DestroyActiveQuery(query);
+		rangeManager->DestroyActiveQuery(parabolicQuery);
+	}
+
 	void test_ParabolicRangeBasic()
 	{
 		ComponentTestHelper test(*g_ScriptContext);
