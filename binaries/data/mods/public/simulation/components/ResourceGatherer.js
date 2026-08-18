@@ -52,6 +52,36 @@ ResourceGatherer.prototype.Init = function()
 	this.lastCarriedType = undefined; // { generic, specific }
 };
 
+ResourceGatherer.prototype.SerializableAttributes = [
+	"carrying",
+	"lastCarriedType",
+	"target",
+	"callerIID",
+	"timer",
+	"taskedResourceType"
+];
+
+ResourceGatherer.prototype.Serialize = function()
+{
+	const result = {};
+
+	for (const att of this.SerializableAttributes)
+		if (Object.hasOwn(this, att))
+			result[att] = this[att];
+
+	return result;
+};
+
+ResourceGatherer.prototype.Deserialize = function(data)
+{
+	this.Init();
+	for (const att of this.SerializableAttributes)
+		if (att in data)
+			this[att] = data[att];
+	this.RecalculateGatherRates(); // also recalculates baseSpeed
+	this.RecalculateCapacities();
+};
+
 /**
  * Returns data about what resources the unit is currently carrying,
  * in the form [ {"type":"wood", "amount":7, "max":10} ]
