@@ -6655,59 +6655,49 @@ UnitAI.prototype.FindWalkAndFightTargets = function()
  * The query range depends on stance because it represents the distance at which
  * the unit should "notice" an enemy and potentially start moving toward it.
  *
- * @param {number} iid - IID_Vision, IID_Heal, or IID_Attack
- * @returns {{min: number, max: number, base: number, parabolic: boolean}}
- * 'parabolic' indicates that the caller
- * should use a parabolic range query (accounting for elevation) instead of a
- * flat 2D one. Generally used for projectile attacks.
- * 'base' is a non-parabolic 2D detection range that always counts as in-range.
+ * @param {number} iid - IID_Vision, IID_Heal, or IID_Attack.
+ * @returns {{min: number, max: number, base: number, parabolic: boolean}} -
+ *	'parabolic' asks the caller for a parabolic query, where 'max' is the
+ *	elevation-aware parabola and 'base' a flat circle around it. A flat query
+ *	uses 'max' alone.
  */
 UnitAI.prototype.GetQueryRange = function(iid)
 {
-	const ret = { "min": 0, "max": 0, "base": 0, "parabolic": false };
-
 	const cmpVision = Engine.QueryInterface(this.entity, IID_Vision);
 	if (!cmpVision)
-		return ret;
+		return { "min": 0, "max": 0, "base": 0, "parabolic": false };
+
 	const visionRange = cmpVision.GetRange();
 
 	if (iid === IID_Vision)
-	{
-		ret.max = visionRange;
-		return ret;
-	}
+		return { "min": 0, "max": visionRange, "base": 0, "parabolic": false };
 
 	const range = this.GetRange(iid);
 	if (!range)
-		return ret;
+		return { "min": 0, "max": 0, "base": 0, "parabolic": false };
 
-	// The query range depends on stance because it represents the distance at which
-	// the unit should "notice" an enemy and potentially start moving toward it.
+	// On StandGround, we care only about what we can immediately attack.
+	if (this.GetStance().respondStandGround)
+		return { "min": range.min, "max": range.max, "base": 0, "parabolic": !!range.parabolic };
 
-	// In all stances, always spot targets within effective attack/heal range.
-	Object.assign(ret, range);
-
-	let nonParabolicMax = 0;
+	let walkRange = 0;
 	if (this.GetStance().respondChase)
 		// Chase: Always spot targets within vision range, so we can chase them.
-		nonParabolicMax = visionRange;
+		walkRange = visionRange;
 	else if (this.GetStance().respondHoldGround)
-		// HoldGround: willing to move a bit, so spot targets within attack range + half vision.
-		nonParabolicMax = Math.min(range.max + visionRange / 2, visionRange);
-
-	// StandGround: nonParabolicMax stays 0, using only parabolic range.
-
-	// We probably have stance 'passive' and we wouldn't have a range,
-	// but as it is the default for healers we need to set it to something sane.
+		// HoldGround: willing to move a bit, but not to leave the area.
+		walkRange = Math.min(range.max + visionRange / 2, visionRange);
 	else if (iid === IID_Heal)
-		nonParabolicMax = visionRange;
+		// We probably have stance 'passive' and we wouldn't have a range,
+		// but as it is the default for healers we need to set it to something sane.
+		walkRange = visionRange;
 
-	if (ret.parabolic)
-		ret.base = nonParabolicMax;
-	else
-		ret.max = nonParabolicMax;
+	// Other stances can move away, so keep the minimum range at 0.
+	if (range.parabolic)
+		return { "min": 0, "max": range.max, "base": walkRange, "parabolic": true };
 
-	return ret;
+	// One radius has to cover both what we can hit and what we would walk to.
+	return { "min": 0, "max": Math.max(range.max, walkRange), "base": 0, "parabolic": false };
 };
 
 UnitAI.prototype.GetStance = function()
