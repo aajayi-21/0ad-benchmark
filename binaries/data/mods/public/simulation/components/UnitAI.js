@@ -5608,8 +5608,7 @@ UnitAI.prototype.ShouldChaseTargetedEntity = function(target, force)
 	// Check if we should chase based on stance
 	if (this.GetStance().respondChase)
 	{
-		// If we're allowed to chase beyond vision, always chase
-		if (this.GetStance().respondChaseBeyondVision)
+		if (force || this.GetStance().respondChaseBeyondVision)
 			return true;
 
 		// Otherwise, only chase if the target is within our personal vision
