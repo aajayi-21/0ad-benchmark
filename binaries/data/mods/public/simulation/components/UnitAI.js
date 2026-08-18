@@ -5187,15 +5187,19 @@ UnitAI.prototype.MoveToTargetAttackRange = function(target, type)
 
 	const flatRange = cmpAttack.GetRange(type);
 	const effectiveRange = cmpAttack.GetEffectiveAttackRange(target, type);
-	if (effectiveRange.max < 0)
-		return false;
+
+	// Out of parabolic range: assume the terrain height difference is to blame,
+	// and close in to reassess from there.
+	if (effectiveRange.min > effectiveRange.max)
+		return cmpUnitMotion.MoveToTargetRange(target, flatRange.min,
+			Math.max(flatRange.min, flatRange.max / 2));
 
 	// The parabola changes while walking so be cautious:
 	const guessedMaxRange = effectiveRange.max > flatRange.max ?
 		(flatRange.max + effectiveRange.max) / 2 :
 		effectiveRange.max;
 
-	return cmpUnitMotion && cmpUnitMotion.MoveToTargetRange(target, effectiveRange.min, guessedMaxRange);
+	return cmpUnitMotion.MoveToTargetRange(target, effectiveRange.min, guessedMaxRange);
 };
 
 UnitAI.prototype.MoveToTargetRangeExplicit = function(target, min, max)

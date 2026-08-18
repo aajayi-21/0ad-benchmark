@@ -572,7 +572,9 @@ Attack.prototype.GetRange = function(type)
  * for elevation and projectile physics where applicable.
  * @param {number} target - The target entity ID.
  * @param {string} type - The attack type.
- * @return {{ min: number, max: number }} - The min and max effective range.
+ * @return {{ min: number, max: number }} - The min and max effective range,
+ *	or { Infinity, 0 } if the target cannot be reached on a parabolic
+ *	trajectory given the current terrain height difference.
  */
 Attack.prototype.GetEffectiveAttackRange = function(target, type)
 {
@@ -931,6 +933,10 @@ Attack.prototype.PerformAttack = function(type, target)
 Attack.prototype.IsTargetInRange = function(target, type)
 {
 	const range = this.GetEffectiveAttackRange(target, type);
+	// Out of parabolic reach: GetEffectiveAttackRange returns { Infinity, 0 } in that case.
+	if (range.min > range.max)
+		return false;
+
 	return Engine.QueryInterface(SYSTEM_ENTITY, IID_ObstructionManager).IsInTargetRange(
 		this.entity, target, range.min, range.max, false);
 };
