@@ -1497,7 +1497,7 @@ public:
 		i64 numerator = rangeSq - distSq;
 
 		entity_pos_t result;
-		result.SetInternalValue(static_cast<i32>(numerator / static_cast<i64>(range.GetInternalValue() * 2)));
+		result.SetInternalValue(static_cast<i32>(numerator / (static_cast<i64>(range.GetInternalValue()) * 2)));
 		return yOrigin + result;
 	}
 
