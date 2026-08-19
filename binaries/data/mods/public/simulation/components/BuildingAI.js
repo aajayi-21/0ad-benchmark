@@ -405,23 +405,4 @@ BuildingAI.prototype.FireArrows = function()
 	++this.currentRound;
 };
 
-/**
- * Returns true if the target entity is visible through the FoW/SoD.
- */
-BuildingAI.prototype.CheckTargetVisible = function(target)
-{
-	var cmpOwnership = Engine.QueryInterface(this.entity, IID_Ownership);
-	if (!cmpOwnership)
-		return false;
-
-	// Entities that are hidden and miraged are considered visible.
-	var cmpFogging = Engine.QueryInterface(target, IID_Fogging);
-	if (cmpFogging && cmpFogging.IsMiraged(cmpOwnership.GetOwner()))
-		return true;
-
-	// Either visible directly, or visible in fog.
-	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
-	return cmpRangeManager.GetLosVisibility(target, cmpOwnership.GetOwner()) != "hidden";
-};
-
 Engine.RegisterComponentType(IID_BuildingAI, "BuildingAI", BuildingAI);
