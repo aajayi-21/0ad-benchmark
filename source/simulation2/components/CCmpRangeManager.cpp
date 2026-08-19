@@ -1483,6 +1483,10 @@ public:
 
 	entity_pos_t GetMaxReachableParabolicHeight(entity_pos_t range, entity_pos_t yOrigin, entity_pos_t horizDistance) const override
 	{
+		// No range, no parabola - and no division below either.
+		if (range <= entity_pos_t::Zero())
+			return yOrigin;
+
 		// EffectiveRange² = range² + 2 * range * heightDiff
 		// Solve for heightDiff when effectiveRange = horizDistance:
 		//   heightDiff = (horizDistance² - range²) / (2 * range)

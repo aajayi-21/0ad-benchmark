@@ -395,6 +395,51 @@ public:
 		rangeManager->DestroyActiveQuery(query2);
 	}
 
+	void test_MaxReachableParabolicHeight()
+	{
+		ComponentTestHelper test(*g_ScriptContext);
+		ICmpRangeManager* rangeManager = test.Add<ICmpRangeManager>(CID_RangeManager, "", SYSTEM_ENTITY);
+
+		const entity_pos_t yOrigin = fixed::FromInt(0);
+
+		// At point blank the parabola peaks at half the range above the source.
+		TS_ASSERT_EQUALS(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(20), yOrigin, fixed::Zero()),
+			fixed::FromInt(10));
+
+		// The reachable height falls off as the target gets further away,
+		// and goes negative past the flat range: the source must then be higher.
+		TS_ASSERT_LESS_THAN(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(20), yOrigin, fixed::FromInt(20)),
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(20), yOrigin, fixed::Zero()));
+		TS_ASSERT_LESS_THAN(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(20), yOrigin, fixed::FromInt(30)),
+			fixed::Zero());
+
+		// yOrigin raises the source, and so the reachable height with it.
+		TS_ASSERT_EQUALS(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(20), fixed::FromInt(5), fixed::Zero()),
+			fixed::FromInt(15));
+
+		// A zero or negative range must not divide by zero: it degenerates to
+		// the launch height itself, whatever the distance asked for.
+		TS_ASSERT_EQUALS(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::Zero(), yOrigin, fixed::Zero()),
+			yOrigin);
+		TS_ASSERT_EQUALS(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::Zero(), fixed::FromInt(7), fixed::FromInt(3)),
+			fixed::FromInt(7));
+		TS_ASSERT_EQUALS(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(-5), fixed::FromInt(7), fixed::FromInt(3)),
+			fixed::FromInt(7));
+
+		// A large range must not overflow when doubled internally: still half the
+		// range above the source at point blank, same as the small-range case above.
+		TS_ASSERT_EQUALS(
+			rangeManager->GetMaxReachableParabolicHeight(fixed::FromInt(20000), yOrigin, fixed::Zero()),
+			fixed::FromInt(10000));
+	}
+
 	// Gaia has no slot in the per-player visibility mask, but the whole map is
 	// revealed to it: a Gaia-owned source must not have its results filtered out.
 	void test_range_queries_gaia_source_visibility()
