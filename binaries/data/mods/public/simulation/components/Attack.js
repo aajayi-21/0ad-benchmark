@@ -256,6 +256,13 @@ Attack.prototype.GetRestrictedClasses = function(type)
 	return [];
 };
 
+/**
+ * Checks whether this entity could ever attack the target, e.g. to decide whether
+ * to bother moving towards it. Covers visibility (mirages included), but its range
+ * check only requires the target to be reachable in principle: it's ORed with
+ * CanEverReachTarget, which ignores terrain. Callers that need to know if the
+ * target is precisely in range right now must check that themselves.
+ */
 Attack.prototype.CanAttack = function(target, wantedTypes)
 {
 	const cmpFormation = Engine.QueryInterface(target, IID_Formation);

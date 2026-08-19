@@ -391,7 +391,14 @@ BuildingAI.prototype.FireArrows = function()
 	{
 
 		const selectedTarget = targets[targetIndex].entityId;
-		if (cmpAttack.CanAttack(selectedTarget, [attackType]))
+		if (cmpAttack.CanAttack(selectedTarget, [attackType]) &&
+			cmpObstructionManager.IsInTargetParabolicRange(
+				this.entity,
+				selectedTarget,
+				range.min,
+				range.max,
+				yOrigin,
+				false))
 		{
 			cmpAttack.PerformAttack(attackType, selectedTarget);
 			PlaySound("attack_" + attackType.toLowerCase(), this.entity);
