@@ -6,7 +6,8 @@
   </Auras>
   <Identity>
     <Civ>germ</Civ>
-    <SpecificName>Lugius</SpecificName>
+    <GenericName>Lugius</GenericName>
+    <SpecificName>Lugijaz</SpecificName>
     <Icon>units/germ/hero_lugius.png</Icon>
   </Identity>
   <VisualActor>

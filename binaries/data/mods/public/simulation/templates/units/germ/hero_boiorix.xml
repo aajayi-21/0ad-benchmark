@@ -6,7 +6,8 @@
   </Auras>
   <Identity>
     <Civ>germ</Civ>
-    <SpecificName>Boiorix</SpecificName>
+    <GenericName>Boiorix</GenericName>
+    <SpecificName>Bajārīks</SpecificName>
     <Icon>units/germ/hero_boiorix.png</Icon>
   </Identity>
   <VisualActor>

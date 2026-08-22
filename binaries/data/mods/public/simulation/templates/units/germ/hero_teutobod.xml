@@ -9,7 +9,8 @@
   </Health>
   <Identity>
     <Civ>germ</Civ>
-    <SpecificName>Teutobod</SpecificName>
+    <GenericName>Teutobod</GenericName>
+    <SpecificName>Þeudōbudô</SpecificName>
     <Icon>units/germ/hero_teutobod.png</Icon>
   </Identity>
   <VisualActor>
