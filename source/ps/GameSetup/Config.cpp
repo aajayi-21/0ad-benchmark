@@ -53,7 +53,7 @@ static void ProcessCommandLineArgs(const CmdLineArgs& args)
 	for (size_t i = 0; i < conf.size(); ++i)
 	{
 		CStr name_value = conf[i];
-		if (name_value.Find(':') != -1)
+		if (name_value.find(':') != std::string::npos)
 		{
 			CStr name = name_value.BeforeFirst(":");
 			CStr value = name_value.AfterFirst(":");
