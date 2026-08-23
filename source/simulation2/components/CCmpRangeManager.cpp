@@ -2140,7 +2140,7 @@ public:
 		if (m_LosRevealWholeMapForAll || player == -1)
 			return true;
 
-		ENSURE(player >= 0 && player <= MAX_LOS_PLAYER_ID+1);
+		ENSURE(player >= 0 && player < MAX_LOS_PLAYER_ID+1);
 		if (m_LosRevealWholeMap[player])
 			return true;
 
