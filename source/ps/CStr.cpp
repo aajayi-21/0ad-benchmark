@@ -264,19 +264,6 @@ double CStr::ToDouble() const
 	return ret;
 }
 
-// Search the string for another string
-long CStr::Find(const int start, const Char chr) const
-{
-	size_t pos = find(chr, start);
-
-	if (pos != npos)
-		return static_cast<long>(pos);
-
-	return -1;
-}
-
-long CStr::FindInsensitive(const int start, const Char chr) const { return LowerCase().Find(start, totlower(chr)); }
-
 long CStr::ReverseFind(const CStr& str) const
 {
 	size_t pos = rfind(str, length() );

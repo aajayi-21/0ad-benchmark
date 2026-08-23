@@ -139,28 +139,6 @@ public:
 	double ToDouble() const;
 
 	/**
-	 * Search the CStr for another string with starting offset.
-	 * The search is case-sensitive.
-	 *
-	 * @param const int & start character offset into CStr to begin search
-	 * @param const {t|w}char_t & chr reference to the search string
-	 * @return long offset into the CStr of the first occurrence of the search string
-	 *				-1 if the search string is not found
-	 **/
-	long Find(const int start, const Char chr) const;
-
-	/**
-	 * Search the CStr for another string with starting offset.
-	 * The search is case-insensitive.
-	 *
-	 * @param const int & start character offset into CStr to begin search
-	 * @param const {t|w}char_t & chr reference to the search string
-	 * @return long offset into the CStr of the first occurrence of the search string
-	 *				-1 if the search string is not found
-	 **/
-	long FindInsensitive(const int start, const Char chr) const;
-
-	/**
 	 * Search the CStr for another string.
 	 * The search is case-sensitive.
 	 *
