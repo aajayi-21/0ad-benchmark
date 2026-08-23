@@ -370,7 +370,7 @@ bool CSoundGroup::LoadSoundGroup(const VfsPath& pathnameXML)
 		}
 		else if (child_name == el_heardby)
 		{
-			if (child.GetText().FindInsensitive("owner") == 0)
+			if (child.GetText().LowerCase().starts_with("owner"))
 				SetFlag(eOwnerOnly);
 		}
 		else if (child_name == el_distanceless)

@@ -142,15 +142,6 @@ public:
 	 * Search the CStr for another string.
 	 * The search is case-sensitive.
 	 *
-	 * @param const CStr & str reference to the search string
-	 * @return long offset into the CStr of the first occurrence of the search string
-	 *				-1 if the search string is not found
-	 **/
-	long Find(const CStr& str) const;
-	/**
-	 * Search the CStr for another string.
-	 * The search is case-sensitive.
-	 *
 	 * @param const {t|w}char_t & chr reference to the search string
 	 * @return long offset into the CStr of the first occurrence of the search string
 	 *				-1 if the search string is not found
@@ -167,15 +158,6 @@ public:
 	 **/
 	long Find(const int start, const Char chr) const;
 
-	/**
-	 * Search the CStr for another string.
-	 * The search is case-insensitive.
-	 *
-	 * @param const CStr & str reference to the search string
-	 * @return long offset into the CStr of the first occurrence of the search string
-	 *				-1 if the search string is not found
-	 **/
-	long FindInsensitive(const CStr& str) const;
 	/**
 	 * Search the CStr for another string.
 	 * The search is case-insensitive.

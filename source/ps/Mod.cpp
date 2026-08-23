@@ -334,8 +334,8 @@ std::vector<CStr> Mod::CheckForIncompatibleMods(const std::vector<CStr>& mods) c
 			// 0ad<=0.0.24
 			for (const CStr& op : toCheck)
 			{
-				const int pos = dep.Find(op.c_str());
-				if (pos == -1)
+				const std::size_t pos{dep.find(op)};
+				if (pos == std::string::npos)
 					continue;
 				//0ad
 				const CStr modToCheck = dep.substr(0, pos);
@@ -364,9 +364,9 @@ bool Mod::CompareVersionStrings(const CStr& version, const CStr& op, const CStr&
 	boost::split(versionSplit, versionSplit[0], boost::is_any_of("."), boost::token_compress_on);
 	boost::split(requiredSplit, requiredSplit[0], boost::is_any_of("."), boost::token_compress_on);
 
-	const bool eq = op.Find("=") != -1;
-	const bool lt = op.Find("<") != -1;
-	const bool gt = op.Find(">") != -1;
+	const bool eq = op.find("=") != std::string::npos;
+	const bool lt = op.find("<") != std::string::npos;
+	const bool gt = op.find(">") != std::string::npos;
 
 	const size_t min = std::min(versionSplit.size(), requiredSplit.size());
 

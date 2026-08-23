@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -90,7 +90,7 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 		 * "grayscale:color:255 255 255 100:stretched:filename.ext"
 		 */
 		// Check that this can be a special sprite.
-		if (SpriteName.ReverseFind(":") == -1 && SpriteName.Find("color(") == -1)
+		if (SpriteName.ReverseFind(":") == -1 && SpriteName.find("color(") == std::string::npos)
 		{
 			LOGERROR("Trying to use a sprite that doesn't exist (\"%s\").", SpriteName.c_str());
 			return;
@@ -98,13 +98,13 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 
 		auto sprite = std::make_unique<CGUISprite>();
 		VfsPath TextureName = VfsPath("art/textures/ui") / wstring_from_utf8(SpriteName.AfterLast(":"));
-		if (SpriteName.Find("stretched:") != -1)
+		if (SpriteName.find("stretched:") != std::string::npos)
 		{
 			// TODO: Should check (nicely) that this is a valid file?
 			auto image = std::make_unique<SGUIImage>();
 
 			image->m_TextureName = TextureName;
-			if (SpriteName.Find("grayscale:") != -1)
+			if (SpriteName.find("grayscale:") != std::string::npos)
 			{
 				image->m_Effects = std::make_shared<SGUIImageEffects>();
 				image->m_Effects->m_Greyscale = true;
@@ -112,12 +112,12 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 
 			sprite->AddImage(std::move(image));
 		}
-		else if (SpriteName.Find("cropped:") != -1)
+		else if (SpriteName.find("cropped:") != std::string::npos)
 		{
 			// TODO: Should check (nicely) that this is a valid file?
 			auto image = std::make_unique<SGUIImage>();
 
-			const bool centered = SpriteName.Find("center:") != -1;
+			const bool centered = SpriteName.find("center:") != std::string::npos;
 
 			CStr info = SpriteName.AfterLast("cropped:").BeforeFirst(":");
 			double xRatio = info.BeforeFirst(",").ToDouble();
@@ -128,7 +128,7 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 			image->m_TextureSize = CGUISize(CRect(0, 0, 0, 0), percentSize);
 			image->m_TextureName = TextureName;
 
-			if (SpriteName.Find("grayscale:") != -1)
+			if (SpriteName.find("grayscale:") != std::string::npos)
 			{
 				image->m_Effects = std::make_shared<SGUIImageEffects>();
 				image->m_Effects->m_Greyscale = true;
@@ -136,7 +136,7 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 
 			sprite->AddImage(std::move(image));
 		}
-		if (SpriteName.Find("color:") != -1)
+		if (SpriteName.find("color:") != std::string::npos)
 		{
 			CStrW value = wstring_from_utf8(SpriteName.AfterLast("color:").BeforeFirst(":"));
 
@@ -146,7 +146,7 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 			// If we are using a mask, this is an effect.
 			// Otherwise we can fallback to the "back color" attribute
 			// TODO: we are assuming there is a filename here.
-			if (SpriteName.Find("textureAsMask:") != -1)
+			if (SpriteName.find("textureAsMask:") != std::string::npos)
 			{
 				image->m_TextureName = TextureName;
 				image->m_Effects = std::make_shared<SGUIImageEffects>();

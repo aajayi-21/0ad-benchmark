@@ -271,7 +271,7 @@ bool CObjectEntry::BuildVariation(const std::vector<const std::set<CStr>*>& comp
 		bool isAmmo = false;
 
 		// Handle the special attachpoint 'loaded-<proppoint>'
-		if (ppn.Find("loaded-") == 0)
+		if (ppn.starts_with("loaded-"))
 		{
 			ppn = prop.m_PropPointName.substr(7);
 			isAmmo = true;

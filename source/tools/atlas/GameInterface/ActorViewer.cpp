@@ -430,7 +430,7 @@ void ActorViewer::SetActor(const CStrW& name, const CStr& animation, player_id_t
 
 			m.CurrentSpeed = speed;
 		}
-		else if (anim.Find("attack_") == 0)
+		else if (anim.starts_with("attack_"))
 		{
 			CmpPtr<ICmpAttack> cmpAttack(m.Simulation2, m.Entity);
 			if (cmpAttack)
