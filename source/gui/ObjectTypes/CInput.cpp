@@ -295,9 +295,7 @@ void CInput::ManuallyMutableHandleKeyDownEvent(const SDL_Keycode keyCode)
 			if (m_iBufferPos == static_cast<int>(caption.length()))
 				caption = caption.substr(0, static_cast<long>(caption.length()) - 1);
 			else
-				caption =
-					caption.substr(0, m_iBufferPos - 1) +
-					caption.Right(static_cast<long>(caption.length()) - m_iBufferPos);
+				caption = caption.substr(0, m_iBufferPos - 1) + caption.substr(m_iBufferPos);
 
 			--m_iBufferPos;
 
@@ -319,10 +317,7 @@ void CInput::ManuallyMutableHandleKeyDownEvent(const SDL_Keycode keyCode)
 			if (caption.empty() || m_iBufferPos == static_cast<int>(caption.length()))
 				break;
 
-			caption =
-				caption.substr(0, m_iBufferPos) +
-				caption.Right(static_cast<long>(caption.length()) - (m_iBufferPos + 1));
-
+			caption = caption.substr(0, m_iBufferPos) + caption.substr(m_iBufferPos + 1);
 			UpdateText(m_iBufferPos, m_iBufferPos + 1, m_iBufferPos);
 		}
 
@@ -363,9 +358,7 @@ void CInput::ManuallyMutableHandleKeyDownEvent(const SDL_Keycode keyCode)
 		if (m_iBufferPos == static_cast<int>(caption.length()))
 			caption += cooked;
 		else
-			caption =
-				caption.substr(0, m_iBufferPos) + cooked +
-				caption.Right(static_cast<long>(caption.length()) - m_iBufferPos);
+			caption = caption.substr(0, m_iBufferPos) + cooked + caption.substr(m_iBufferPos);
 
 		UpdateText(m_iBufferPos, m_iBufferPos, m_iBufferPos + 1);
 
@@ -654,9 +647,7 @@ Input::Reaction CInput::ManuallyHandleHotkeyEvent(const SDL_Event& ev)
 		if (m_iBufferPos == static_cast<int>(caption.length()))
 			caption += text;
 		else
-			caption =
-				caption.substr(0, m_iBufferPos) + text +
-				caption.Right(static_cast<long>(caption.length()) - m_iBufferPos);
+			caption = caption.substr(0, m_iBufferPos) + text + caption.substr(m_iBufferPos);
 
 		UpdateText(m_iBufferPos, m_iBufferPos, m_iBufferPos+1);
 
@@ -2009,8 +2000,7 @@ void CInput::DeleteCurSelection()
 	}
 
 	// Silently change.
-	m_Caption.Set(m_Caption->substr(0, virtualFrom) +
-		m_Caption->Right(static_cast<long>(m_Caption->length()) - virtualTo), false);
+	m_Caption.Set(m_Caption->substr(0, virtualFrom) + m_Caption->substr(virtualTo), false);
 
 	UpdateText(virtualFrom, virtualTo, virtualFrom);
 

@@ -162,14 +162,6 @@ public:
 	CStr UpperCase() const;
 
 	/**
-	 * Retrieve last n characters of the CStr.
-	 *
-	 * @param size_t len the number of characters to retrieve.
-	 * @return CStr retrieved substring.
-	 **/
-	CStr Right(size_t len) const;
-
-	/**
 	 * Retrieve substring of the CStr after last occurrence of a string.
 	 * Return substring of the CStr after the last occurrence of the search string.
 	 *

@@ -293,13 +293,6 @@ CStr CStr::UpperCase() const
 	return newStr;
 }
 
-// Retrieve the substring of the last n characters
-CStr CStr::Right(size_t len) const
-{
-	ENSURE(len <= length());
-	return substr(length()-len, len);
-}
-
 // Retrieve the substring following the last occurrence of Str
 // (or the whole string if it doesn't contain Str)
 CStr CStr::AfterLast(const CStr& str, size_t startPos) const
