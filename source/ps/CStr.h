@@ -77,13 +77,6 @@ public:
 	 **/
 	static CStr Repeat(const CStr& str, size_t reps);
 
-	/**
-	 * Construction from u16strings.
-	 *
-	 * @param u16string String u16string to be used for initialization.
-	 **/
-	explicit CStr(const std::u16string& str) : StrBase(str.begin(), str.end()) {}
-
 	// Conversion to/from UTF-8, encoded in a CStr8.
 	// Invalid bytes/characters (e.g. broken UTF-8, and Unicode characters
 	// above U+FFFF) are silently replaced with U+FFFD.
@@ -232,9 +225,6 @@ public:
 	 * @return CStr copy of trimmed CStr.
 	 **/
 	CStr Trim(PS_TRIM_MODE mode) const;
-
-	// Conversion to u16string
-	std::u16string utf16() const { return std::u16string(begin(), end()); }
 
 	// Calculates a hash of the string's contents
 	size_t GetHashCode() const;
