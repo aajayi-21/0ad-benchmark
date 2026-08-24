@@ -15,8 +15,8 @@
  * along with 0 A.D.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef XXXMPPCLIENT_H
-#define XXXMPPCLIENT_H
+#ifndef XMPPCLIENT_H
+#define XMPPCLIENT_H
 
 #include "lib/types.h"
 
