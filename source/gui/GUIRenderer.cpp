@@ -90,7 +90,7 @@ void GUIRenderer::UpdateDrawCallCache(const CGUI& pGUI, DrawCalls& Calls, const 
 		 * "grayscale:color:255 255 255 100:stretched:filename.ext"
 		 */
 		// Check that this can be a special sprite.
-		if (SpriteName.ReverseFind(":") == -1 && SpriteName.find("color(") == std::string::npos)
+		if (SpriteName.find(":") == std::string::npos && SpriteName.find("color(") == std::string::npos)
 		{
 			LOGERROR("Trying to use a sprite that doesn't exist (\"%s\").", SpriteName.c_str());
 			return;

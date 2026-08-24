@@ -132,16 +132,6 @@ public:
 	double ToDouble() const;
 
 	/**
-	 * Search the CStr for another string.
-	 * The search is case-sensitive.
-	 *
-	 * @param const CStr & str reference to the search string
-	 * @return long offset into the CStr of the last occurrence of the search string
-	 *				-1 if the search string is not found
-	 **/
-	long ReverseFind(const CStr& str) const;
-
-	/**
 	 * Make a copy of the CStr in lower-case.
 	 *
 	 * @return CStr converted copy of CStr.

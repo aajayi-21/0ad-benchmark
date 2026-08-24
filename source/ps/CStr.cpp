@@ -264,16 +264,6 @@ double CStr::ToDouble() const
 	return ret;
 }
 
-long CStr::ReverseFind(const CStr& str) const
-{
-	size_t pos = rfind(str, length() );
-
-	if (pos != npos)
-		return static_cast<long>(pos);
-
-	return -1;
-}
-
 // Lowercase and uppercase
 CStr CStr::LowerCase() const
 {
