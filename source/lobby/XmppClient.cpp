@@ -903,15 +903,10 @@ JS::Value XmppClient::GuiPollNewMessages(const Script::Interface& guiInterface)
 			continue;
 
 		JS::RootedValue historicMessage(rq.cx, Script::DeepCopy(rq, rootedMessage));
-		if (true)
-		{
-			Script::SetProperty(rq, historicMessage, "historic", true);
-			Script::DeepFreezeObject(rq, historicMessage);
-			if (!m_Impl->m_HistoricGuiMessages.append(historicMessage))
-				throw std::runtime_error{"Append failed"};
-		}
-		else
-			LOGERROR("Could not clone historic lobby GUI message!");
+		Script::SetProperty(rq, historicMessage, "historic", true);
+		Script::DeepFreezeObject(rq, historicMessage);
+		if (!m_Impl->m_HistoricGuiMessages.append(historicMessage))
+			throw std::runtime_error{"Append failed"};
 	}
 	m_Impl->m_GuiMessageQueue.clear();
 
