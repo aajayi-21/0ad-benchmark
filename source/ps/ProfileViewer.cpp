@@ -43,6 +43,7 @@
 #include <SDL_keycode.h>
 #include <algorithm>
 #include <ctime>
+#include <fmt/ostream.h>
 #include <fstream>
 #include <js/RootingAPI.h>
 #include <js/TypeDecls.h>
@@ -405,8 +406,8 @@ namespace
 			for (size_t r = 0; r < data.size()/cols; ++r)
 			{
 				for (size_t c = 0; c < cols; ++c)
-					m_OutputStream << (c ? " | " : "\n")
-					  << data[r*cols + c].Pad(PS_TRIM_RIGHT, columnWidths[c]);
+					fmt::print(m_OutputStream, "{}{:<{}}", c ? " | " : "\n", data[r * cols + c],
+						columnWidths[c]);
 
 				// Add dividers under some rows. (Currently only the first, since
 				// that contains the column headers.)

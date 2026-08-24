@@ -434,37 +434,6 @@ CStr CStr::Trim(PS_TRIM_MODE mode) const
 	return substr(left, right - left + 1);
 }
 
-CStr CStr::Pad(PS_TRIM_MODE mode, size_t len) const
-{
-	size_t left = 0, right = 0;
-
-	if (len <= length())
-		return *this;
-
-	// From here: Length-length() >= 1
-
-	switch (mode)
-	{
-	case PS_TRIM_LEFT:
-		left = len - length();
-		break;
-
-	case PS_TRIM_RIGHT:
-		right = len - length();
-		break;
-
-	case PS_TRIM_BOTH:
-		left = (len - length() + 1) / 2;
-		right = (len - length() - 1) / 2; // cannot be negative
-		break;
-
-	default:
-		debug_warn(L"CStr::Trim: invalid Mode");
-	}
-
-	return StrBase(left, ' ') + *this + StrBase(right, ' ');
-}
-
 size_t CStr::GetHashCode() const
 {
 	return (size_t)fnv_hash(data(), length()*sizeof(value_type));

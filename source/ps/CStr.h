@@ -24,7 +24,7 @@
 #define INCLUDED_CSTR
 
 /**
- * Whitespace trim identifier for Trim and Pad functions
+ * Whitespace trim identifier for Trim functions
  **/
 enum PS_TRIM_MODE
 {
@@ -232,15 +232,6 @@ public:
 	 * @return CStr copy of trimmed CStr.
 	 **/
 	CStr Trim(PS_TRIM_MODE mode) const;
-
-	/**
-	 * Return a space padded copy of the CStr.
-	 *
-	 * @param PS_TRIM_MODE Mode value from trim mode enumeration.
-	 * @param size_t Length number of pad spaces to add
-	 * @return CStr copy of padded CStr.
-	 **/
-	CStr Pad(PS_TRIM_MODE mode, size_t len) const;
 
 	// Conversion to u16string
 	std::u16string utf16() const { return std::u16string(begin(), end()); }
