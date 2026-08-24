@@ -288,7 +288,7 @@ void WriteJSONFile(const Script::Interface& scriptInterface, const std::wstring&
 bool DeleteCampaignSave(const CStrW& filePath)
 {
 	OsPath realPath;
-	if (filePath.Left(16) != L"saves/campaigns/" || filePath.Right(12) != L".0adcampaign")
+	if (!filePath.starts_with(L"saves/campaigns/") || filePath.Right(12) != L".0adcampaign")
 		return false;
 	if (!VfsFileExists(filePath))
 		return false;

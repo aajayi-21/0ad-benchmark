@@ -1613,7 +1613,7 @@ CStrW CNetServerWorker::SanitisePlayerName(const CStrW& original)
 
 	// Restrict the length
 	if (name.length() > MAX_LENGTH)
-		name = name.Left(MAX_LENGTH);
+		name = name.substr(0, MAX_LENGTH);
 
 	// Don't allow surrounding whitespace
 	name.Trim(PS_TRIM_BOTH);

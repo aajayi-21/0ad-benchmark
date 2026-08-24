@@ -643,7 +643,7 @@ void CConsole::LoadHistory()
 		if (pos != CStrW::npos)
 		{
 			if (pos > 0)
-				m_BufHistory.push_front(str.Left(str[pos-1] == '\r' ? pos - 1 : pos));
+				m_BufHistory.push_front(str.substr(0, str[pos-1] == '\r' ? pos - 1 : pos));
 			str.erase(0, pos + 1);
 		}
 		else if (str.length() > 0)

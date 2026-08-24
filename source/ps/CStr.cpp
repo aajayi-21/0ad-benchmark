@@ -293,14 +293,6 @@ CStr CStr::UpperCase() const
 	return newStr;
 }
 
-
-// Retrieve the substring of the first n characters
-CStr CStr::Left(size_t len) const
-{
-	ENSURE(len <= length());
-	return substr(0, len);
-}
-
 // Retrieve the substring of the last n characters
 CStr CStr::Right(size_t len) const
 {

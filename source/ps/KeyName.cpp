@@ -109,7 +109,7 @@ SDL_Scancode FindScancode(const CStr8& keyname)
 		return code;
 
 	// Parse SYM_XX codes, see below.
-	if (keyname.size() > 4 && keyname.Left(4) == "SYM_")
+	if (keyname.size() > 4 && keyname.starts_with("SYM_"))
 		return static_cast<SDL_Scancode>(CStr(keyname.substr(4)).ToInt());
 
 	return SDL_SCANCODE_UNKNOWN;

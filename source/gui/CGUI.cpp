@@ -732,7 +732,7 @@ void CGUI::Xeromyces_ReadObject(const XMBData& xmb, XMBElement element, IGUIObje
 		{
 			CStr name(attr.Value);
 
-			if (name.Left(2) == "__")
+			if (name.starts_with("__"))
 			{
 				LOGERROR("GUI: Names starting with '__' are reserved for the engine (object: %s)", name.c_str());
 				continue;

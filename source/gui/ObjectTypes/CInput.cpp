@@ -293,10 +293,10 @@ void CInput::ManuallyMutableHandleKeyDownEvent(const SDL_Keycode keyCode)
 				break;
 
 			if (m_iBufferPos == static_cast<int>(caption.length()))
-				caption = caption.Left(static_cast<long>(caption.length()) - 1);
+				caption = caption.substr(0, static_cast<long>(caption.length()) - 1);
 			else
 				caption =
-					caption.Left(m_iBufferPos - 1) +
+					caption.substr(0, m_iBufferPos - 1) +
 					caption.Right(static_cast<long>(caption.length()) - m_iBufferPos);
 
 			--m_iBufferPos;
@@ -320,7 +320,7 @@ void CInput::ManuallyMutableHandleKeyDownEvent(const SDL_Keycode keyCode)
 				break;
 
 			caption =
-				caption.Left(m_iBufferPos) +
+				caption.substr(0, m_iBufferPos) +
 				caption.Right(static_cast<long>(caption.length()) - (m_iBufferPos + 1));
 
 			UpdateText(m_iBufferPos, m_iBufferPos + 1, m_iBufferPos);
@@ -364,7 +364,7 @@ void CInput::ManuallyMutableHandleKeyDownEvent(const SDL_Keycode keyCode)
 			caption += cooked;
 		else
 			caption =
-				caption.Left(m_iBufferPos) + cooked +
+				caption.substr(0, m_iBufferPos) + cooked +
 				caption.Right(static_cast<long>(caption.length()) - m_iBufferPos);
 
 		UpdateText(m_iBufferPos, m_iBufferPos, m_iBufferPos + 1);
@@ -655,7 +655,7 @@ Input::Reaction CInput::ManuallyHandleHotkeyEvent(const SDL_Event& ev)
 			caption += text;
 		else
 			caption =
-				caption.Left(m_iBufferPos) + text +
+				caption.substr(0, m_iBufferPos) + text +
 				caption.Right(static_cast<long>(caption.length()) - m_iBufferPos);
 
 		UpdateText(m_iBufferPos, m_iBufferPos, m_iBufferPos+1);
@@ -691,7 +691,7 @@ Input::Reaction CInput::ManuallyHandleHotkeyEvent(const SDL_Event& ev)
 				virtualTo = m_iBufferPos;
 			}
 
-			CStrW text = caption.Left(virtualTo).Right(virtualTo - virtualFrom);
+			CStrW text = caption.substr(virtualFrom, virtualTo - virtualFrom);
 
 			SDL_SetClipboardText(text.ToUTF8().c_str());
 
@@ -718,7 +718,7 @@ Input::Reaction CInput::ManuallyHandleHotkeyEvent(const SDL_Event& ev)
 		if (!caption.empty() && m_iBufferPos != 0)
 		{
 			m_iBufferPos_Tail = m_iBufferPos;
-			CStrW searchString = caption.Left(m_iBufferPos);
+			CStrW searchString = caption.substr(0, m_iBufferPos);
 
 			// If we are starting in whitespace, adjust position until we get a non whitespace
 			while (m_iBufferPos > 0)
@@ -801,7 +801,7 @@ Input::Reaction CInput::ManuallyHandleHotkeyEvent(const SDL_Event& ev)
 
 			if (!caption.empty() && m_iBufferPos != 0)
 			{
-				CStrW searchString = caption.Left(m_iBufferPos);
+				CStrW searchString = caption.substr(0, m_iBufferPos);
 
 				// If we are starting in whitespace, adjust position until we get a non whitespace
 				while (m_iBufferPos > 0)
@@ -2009,8 +2009,8 @@ void CInput::DeleteCurSelection()
 	}
 
 	// Silently change.
-	m_Caption.Set(m_Caption->Left(virtualFrom) + m_Caption->Right(static_cast<long>(m_Caption->length()) - virtualTo),
-				  false);
+	m_Caption.Set(m_Caption->substr(0, virtualFrom) +
+		m_Caption->Right(static_cast<long>(m_Caption->length()) - virtualTo), false);
 
 	UpdateText(virtualFrom, virtualTo, virtualFrom);
 
