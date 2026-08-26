@@ -358,6 +358,9 @@ int CMapReader::ApplyTerrainData()
 						for (ssize_t k=0; k<PATCH_SIZE; k++) {
 							CMiniPatch& mp = pTerrain->GetPatch(i,j)->m_MiniPatches[m][k];	// can't fail
 
+							if (tileptr->m_Tex1Index >= m_TerrainTextures.size())
+								throw PSERROR_Game_World_MapLoadFailed("Error loading map: terrain tile references an invalid texture index.\nCheck application log for details.");
+
 							mp.Tex = m_TerrainTextures[tileptr->m_Tex1Index];
 							mp.Priority = tileptr->m_Priority;
 
