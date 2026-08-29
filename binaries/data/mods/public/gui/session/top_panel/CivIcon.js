@@ -48,7 +48,7 @@ class CivIcon
 
 	rebuild()
 	{
-		const hidden = g_ViewedPlayer <= 0;
+		const hidden = g_ViewedPlayer < 0;
 		this.civIcon.hidden = hidden;
 		if (hidden)
 			return;

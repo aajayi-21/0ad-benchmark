@@ -39,7 +39,15 @@ function loadCivData(selectableOnly, gaia)
 	translateObjectKeys(civData, ["Name", "Description", "History", "Special"]);
 
 	if (gaia)
-		civData.gaia = { "Code": "gaia", "Name": translate("Gaia") };
+	{
+		const gaiaTemplate = Engine.GetTemplate("special/players/gaia");
+
+		civData.gaia = {
+			"Code": "gaia",
+			"Name": translate(gaiaTemplate.Identity.GenericName),
+			"Emblem": "session/portraits/" + gaiaTemplate.Identity.Icon
+		};
+	}
 
 	return deepfreeze(civData);
 }
