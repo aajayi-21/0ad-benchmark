@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -54,9 +54,9 @@ RealDirectory::RealDirectory(const OsPath& path, size_t priority, size_t flags)
 }
 
 
-Status RealDirectory::Store(const OsPath& name, const std::shared_ptr<u8>& fileContents, size_t size)
+Status RealDirectory::Store(const OsPath& name, std::span<const u8> fileContents)
 {
-	return io::Store(m_path / name, fileContents.get(), size);
+	return io::Store(m_path / name, fileContents.data(), fileContents.size());
 }
 
 

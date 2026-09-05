@@ -161,7 +161,7 @@ Status SavedGames::Save(const CStrW& name, const CStrW& description, CSimulation
 	WARN_RETURN_STATUS_IF_ERR(GetFileInfo(tempSaveFileRealPath, &tempSaveFile));
 	buffer.Reserve(tempSaveFile.Size());
 	WARN_RETURN_STATUS_IF_ERR(io::Load(tempSaveFileRealPath, buffer.Data().get(), buffer.Size()));
-	WARN_RETURN_STATUS_IF_ERR(g_VFS->CreateFile(filename, buffer.Data(), buffer.Size()));
+	WARN_RETURN_STATUS_IF_ERR(g_VFS->CreateFile(filename, {buffer.Data().get(), buffer.Size()}));
 
 	OsPath realPath;
 	WARN_RETURN_STATUS_IF_ERR(g_VFS->GetRealPath(filename, realPath));

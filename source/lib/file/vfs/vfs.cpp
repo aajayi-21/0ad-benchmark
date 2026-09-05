@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -134,7 +134,7 @@ public:
 		return INFO::OK;
 	}
 
-	virtual Status CreateFile(const VfsPath& pathname, const std::shared_ptr<u8>& fileContents, size_t size)
+	virtual Status CreateFile(const VfsPath& pathname, std::span<const u8> fileContents)
 	{
 		std::lock_guard<std::mutex> lock(vfs_mutex);
 		VfsDirectory* directory;
@@ -147,12 +147,12 @@ public:
 
 		const PRealDirectory& realDirectory = directory->AssociatedDirectory();
 		const OsPath name = pathname.Filename();
-		RETURN_STATUS_IF_ERR(realDirectory->Store(name, fileContents, size));
+		RETURN_STATUS_IF_ERR(realDirectory->Store(name, fileContents));
 
-		const VfsFile file(name, size, time(0), realDirectory->Priority(), realDirectory);
+		const VfsFile file(name, fileContents.size(), time(0), realDirectory->Priority(), realDirectory);
 		directory->AddFile(file);
 
-		m_trace->NotifyStore(pathname, size);
+		m_trace->NotifyStore(pathname, fileContents.size());
 		return INFO::OK;
 	}
 

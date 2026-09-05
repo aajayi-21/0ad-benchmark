@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -263,6 +263,6 @@ void CHeightMipmap::DumpToDisk(const VfsPath& filename) const
 
 	DynArray da;
 	WARN_IF_ERR(t.encode(filename.Extension(), &da));
-	g_VFS->CreateFile(filename, DummySharedPtr(da.base), da.pos);
+	g_VFS->CreateFile(filename, {da.base, da.pos});
 	std::ignore = da_free(&da);
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -85,20 +85,20 @@ public:
 		g_VFS->Mount(L"", TEST_FOLDER / "some_mod" / "", 0, 0);
 
 		// Access the subfolder, creating subdirectories in the VFS.
-		g_VFS->CreateFile(L"cache/some_mod/peek.txt", buf, 0);
+		g_VFS->CreateFile(L"cache/some_mod/peek.txt", {buf.get(), 0});
 
 		g_VFS->Mount(L"cache/", TEST_FOLDER / "cache" / "", 0, 1);
 
 		OsPath realPath;
 		g_VFS->GetDirectoryRealPath(L"cache/", realPath);
 		TS_ASSERT_EQUALS(realPath, TEST_FOLDER / "cache" / "");
-		g_VFS->CreateFile(L"cache/test.txt", buf, 0);
+		g_VFS->CreateFile(L"cache/test.txt", {buf.get(), 0});
 		g_VFS->GetRealPath(L"cache/test.txt", realPath);
 		TS_ASSERT_EQUALS(realPath, TEST_FOLDER / "cache" / "test.txt");
 
 		g_VFS->GetDirectoryRealPath(L"cache/some_mod/", realPath);
 		TS_ASSERT_EQUALS(realPath, TEST_FOLDER / "cache" / "some_mod" / "");
-		g_VFS->CreateFile(L"cache/some_mod/test.txt", buf, 0);
+		g_VFS->CreateFile(L"cache/some_mod/test.txt", {buf.get(), 0});
 		g_VFS->GetRealPath(L"cache/some_mod/test.txt", realPath);
 		TS_ASSERT_EQUALS(realPath, TEST_FOLDER / "cache" / "some_mod" / "test.txt");
 	};

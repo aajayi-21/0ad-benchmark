@@ -76,7 +76,7 @@ Status tex_write(Tex* t, const VfsPath& filename)
 	Status ret = INFO::OK;
 	{
 		std::shared_ptr<u8> file = DummySharedPtr(da.base);
-		const ssize_t bytes_written = g_VFS->CreateFile(filename, file, da.pos);
+		const ssize_t bytes_written = g_VFS->CreateFile(filename, {file.get(), da.pos});
 		if(bytes_written > 0)
 			ENSURE(bytes_written == (ssize_t)da.pos);
 		else

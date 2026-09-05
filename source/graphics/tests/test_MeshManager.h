@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -84,7 +84,7 @@ class TestMeshManager : public CxxTest::TestSuite
 		// Copy a file into the mod directory, so we can work on it:
 		std::shared_ptr<u8> data; size_t size = 0;
 		TS_ASSERT_OK(g_VFS->LoadFile(src, data, size));
-		TS_ASSERT_OK(g_VFS->CreateFile(dst, data, size));
+		TS_ASSERT_OK(g_VFS->CreateFile(dst, {data.get(), size}));
 	}
 
 	void buildArchive()
@@ -123,7 +123,7 @@ public:
 		std::shared_ptr<u8> buf;
 		AllocateAligned(buf, 100, maxSectorSize);
 		strcpy_s((char*)buf.get(), 5, "Test");
-		g_VFS->CreateFile(testDAE, buf, 4);
+		g_VFS->CreateFile(testDAE, {buf.get(), 4});
 	}
 
 	void test_load_pmd_with_extension()
@@ -189,7 +189,7 @@ public:
 		std::shared_ptr<u8> buf;
 		AllocateAligned(buf, 100, maxSectorSize);
 		strcpy_s((char*)buf.get(), 100, "Not valid XML");
-		g_VFS->CreateFile(testSkeletonDefs, buf, 13);
+		g_VFS->CreateFile(testSkeletonDefs, {buf.get(), 13});
 
 		CModelDefPtr modeldef = meshManager->GetMesh(testDAE);
 		TS_ASSERT(! modeldef);
@@ -204,7 +204,7 @@ public:
 		std::shared_ptr<u8> buf;
 		AllocateAligned(buf, 100, maxSectorSize);
 		strcpy_s((char*)buf.get(), 100, "Not valid XML");
-		g_VFS->CreateFile(testDAE, buf, 13);
+		g_VFS->CreateFile(testDAE, {buf.get(), 13});
 
 		CModelDefPtr modeldef = meshManager->GetMesh(testDAE);
 		TS_ASSERT(! modeldef);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
 
 constexpr size_t VFS_MIN_PRIORITY = 0;
@@ -148,7 +149,7 @@ struct IVFS
 	 * @param size [bytes] of the contents, will match that of the file.
 	 * @return Status.
 	 **/
-	virtual Status CreateFile(const VfsPath& pathname, const std::shared_ptr<u8>& fileContents, size_t size) = 0;
+	virtual Status CreateFile(const VfsPath& pathname, std::span<const u8> fileContents) = 0;
 
 	/**
 	 * Read an entire file into memory.

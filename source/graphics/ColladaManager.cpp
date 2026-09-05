@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -187,7 +187,7 @@ public:
 		// logic warns when asked to load such.
 		if (writeBuffer.Size())
 		{
-			Status ret = m_VFS->CreateFile(pmdFilename, writeBuffer.Data(), writeBuffer.Size());
+			Status ret = m_VFS->CreateFile(pmdFilename, {writeBuffer.Data().get(), writeBuffer.Size()});
 			ENSURE(ret == INFO::OK);
 		}
 

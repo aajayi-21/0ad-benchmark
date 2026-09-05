@@ -42,7 +42,7 @@ class TestSimulation2 : public CxxTest::TestSuite
 		std::shared_ptr<u8> data;
 		size_t size = 0;
 		TS_ASSERT_OK(g_VFS->LoadFile(src, data, size));
-		TS_ASSERT_OK(g_VFS->CreateFile(dst, data, size));
+		TS_ASSERT_OK(g_VFS->CreateFile(dst, {data.get(), size}));
 	}
 
 	CTerrain m_Terrain;

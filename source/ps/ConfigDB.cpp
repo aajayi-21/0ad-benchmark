@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -506,7 +506,7 @@ bool CConfigDB::WriteFile(EConfigNamespace ns, const VfsPath& path) const
 		len = pos - (char*)buf.get();
 	}
 
-	Status ret = g_VFS->CreateFile(path, buf, len);
+	Status ret = g_VFS->CreateFile(path, {buf.get(), len});
 	if (ret < 0)
 	{
 		LOGERROR("CConfigDB::WriteFile(): CreateFile \"%s\" failed (error: %d)", path.string8(), (int)ret);

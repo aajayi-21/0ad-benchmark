@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -77,14 +77,14 @@ public:
 	void test_getPathnames()
 	{
 		std::shared_ptr<u8> nodata(new u8);
-		g_VFS->CreateFile("test_file.txt", nodata, 0);
-		g_VFS->CreateFile("test_file2.txt", nodata, 0);
-		g_VFS->CreateFile("test_file3.txt", nodata, 0);
-		g_VFS->CreateFile("test_file2.not_txt", nodata, 0);
-		g_VFS->CreateFile("sub_folder_a/sub_test_file1.txt", nodata, 0);
-		g_VFS->CreateFile("sub_folder_a/sub_test_file2.txt", nodata, 0);
-		g_VFS->CreateFile("sub_folder_b/sub_test_file1.txt", nodata, 0);
-		g_VFS->CreateFile("sub_folder_b/another_file.not_txt", nodata, 0);
+		g_VFS->CreateFile("test_file.txt", {nodata.get(), 0});
+		g_VFS->CreateFile("test_file2.txt", {nodata.get(), 0});
+		g_VFS->CreateFile("test_file3.txt", {nodata.get(), 0});
+		g_VFS->CreateFile("test_file2.not_txt", {nodata.get(), 0});
+		g_VFS->CreateFile("sub_folder_a/sub_test_file1.txt", {nodata.get(), 0});
+		g_VFS->CreateFile("sub_folder_a/sub_test_file2.txt", {nodata.get(), 0});
+		g_VFS->CreateFile("sub_folder_b/sub_test_file1.txt", {nodata.get(), 0});
+		g_VFS->CreateFile("sub_folder_b/another_file.not_txt", {nodata.get(), 0});
 
 		VfsPaths pathNames;
 		vfs::GetPathnames(g_VFS, "", L"*.txt", pathNames);

@@ -275,7 +275,7 @@ void WriteJSONFile(const Script::Interface& scriptInterface, const std::wstring&
 	VfsPath path(filePath);
 	WriteBuffer buf;
 	buf.Append(str.c_str(), str.length());
-	if (g_VFS->CreateFile(path, buf.Data(), buf.Size()) == INFO::OK)
+	if (g_VFS->CreateFile(path, {buf.Data().get(), buf.Size()}) == INFO::OK)
 	{
 		OsPath realPath;
 		g_VFS->GetRealPath(path, realPath, false);

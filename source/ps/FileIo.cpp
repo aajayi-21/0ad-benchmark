@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -76,7 +76,7 @@ void CFilePacker::Write(const VfsPath& filename)
 	m_writeBuffer.Overwrite(&payloadSize_le, sizeof(payloadSize_le), 0+offsetof(FileHeader, payloadSize_le));
 
 	// write out all data (including header)
-	const Status st = g_VFS->CreateFile(filename, m_writeBuffer.Data(), m_writeBuffer.Size());
+	const Status st = g_VFS->CreateFile(filename, {m_writeBuffer.Data().get(), m_writeBuffer.Size()});
 	if (st < 0)
 	{
 		LOGERROR("Failed to write file '%s' with status '%lld'", filename.string8(), (long long)st);

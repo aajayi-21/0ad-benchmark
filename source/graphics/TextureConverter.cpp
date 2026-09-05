@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -521,7 +521,7 @@ bool CTextureConverter::Poll(CTexturePtr& texture, VfsPath& dest, bool& ok)
 	std::shared_ptr<u8> file;
 	AllocateAligned(file, size, maxSectorSize);
 	memcpy(file.get(), &result->output.buffer[0], size);
-	if (m_VFS->CreateFile(result->dest, file, size) < 0)
+	if (m_VFS->CreateFile(result->dest, {file.get(), size}) < 0)
 	{
 		// error writing file
 		ok = false;

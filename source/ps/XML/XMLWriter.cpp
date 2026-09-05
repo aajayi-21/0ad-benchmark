@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -108,7 +108,7 @@ bool XMLWriter_File::StoreVFS(const PIVFS& vfs, const VfsPath& pathname)
 	std::shared_ptr<u8> data;
 	AllocateAligned(data, size, maxSectorSize);
 	memcpy(data.get(), m_Data.data(), size);
-	Status ret = vfs->CreateFile(pathname, data, size);
+	Status ret = vfs->CreateFile(pathname, {data.get(), size});
 	if (ret < 0)
 	{
 		LOGERROR("Error saving XML data through VFS: %lld '%s'", (long long)ret, pathname.string8());

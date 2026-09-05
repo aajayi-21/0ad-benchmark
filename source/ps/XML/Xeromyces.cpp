@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Wildfire Games.
+/* Copyright (C) 2026 Wildfire Games.
  * This file is part of 0 A.D.
  *
  * 0 A.D. is free software: you can redistribute it and/or modify
@@ -189,7 +189,7 @@ PSRETURN CXeromyces::ConvertFile(const PIVFS& vfs, const VfsPath& filename, cons
 
 	// Save the file to disk, so it can be loaded quickly next time.
 	// Don't save if invalid, because we want the syntax error every program start.
-	vfs->CreateFile(xmbPath, m_Data.m_Buffer, m_Data.m_Size);
+	vfs->CreateFile(xmbPath, {m_Data.m_Buffer.get(), m_Data.m_Size});
 
 	// Set up the XMBData
 	const bool ok = Initialise(m_Data);
