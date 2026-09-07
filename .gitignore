@@ -43,6 +43,13 @@ build/premake/.gccver.tmp
 # Docs build folder
 docs/doxygen/output/
 
+# Local AI benchmark build documentation, specifications, and artifacts
+/docs/agent-benchmark/
+
+# Local coding-agent instructions
+/AGENTS.md
+/CLAUDE.md
+
 # Build files (cpp)
 *.a
 *.dylib
