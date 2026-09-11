@@ -8,6 +8,8 @@ BenchmarkInterface.prototype.Init = function()
 {
 	this.handles = new Map();
 	this.handleCounters = new Map();
+	this.queueHandles = new Map();
+	this.observations = new BenchmarkObservations(this);
 	this.recording = false;
 	this.results = [];
 	this.commandTrace = [];
@@ -86,7 +88,25 @@ BenchmarkInterface.prototype.GetPlayer = function(seat)
 	};
 };
 
-/** Complete current records for gameplay entities, plus an intentionally limited M1 player view. */
+/** Capture knowledge only after completed engine turns, never during inspection. */
+BenchmarkInterface.prototype.UpdateKnowledge = function(seats, turn)
+{
+	this.observations.Capture(seats, turn);
+	return true;
+};
+
+BenchmarkInterface.prototype.FreezeObservation = function(seats, episode)
+{
+	this.observations.Freeze(seats, episode);
+	return true;
+};
+
+BenchmarkInterface.prototype.Inspect = function(seat, query)
+{
+	return BenchmarkObservationQueries.Inspect(this.observations.views[seat], JSON.parse(query));
+};
+
+/** Evaluator records are private; player records come only from the frozen cache. */
 BenchmarkInterface.prototype.GetSnapshot = function(seats)
 {
 	const count = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager).GetNumPlayers();
@@ -96,83 +116,28 @@ BenchmarkInterface.prototype.GetSnapshot = function(seats)
 		...Engine.GetEntitiesWithInterface(IID_Ownership)
 	]);
 	const entities = Array.from(ids).sort((a, b) => a - b).map(id => this.GetEntity(id));
-	const views = {};
-	for (const seat of seats)
-	{
-		if (!Number.isInteger(seat) || seat < 1 || seat >= count)
-			throw new Error("Invalid observation seat");
-		if (!this.handles.has(seat))
-			this.handles.set(seat, new Map());
-		const handles = this.handles.get(seat);
-		const own = entities.filter(entity => entity.owner == seat);
-		const ownIDs = new Set(own.map(entity => entity.id));
-		for (const entity of own)
-			if (!handles.has(entity.id))
-				this.Handle(seat, entity.id);
-		views[seat] = {
-			"seat": seat,
-			"coverage": "current_targets_m2",
-			"unavailable_sections": ["last_seen", "map", "events", "orders"],
-			"visible_entities": entities.filter(entity => entity.owner != seat &&
-				BenchmarkActions.Visible(seat, entity.id)).map(entity => ({
-				"handle": this.Handle(seat, entity.id), "template": entity.template,
-				"owner": entity.owner, "classes": entity.classes, "position": entity.position,
-				"health": entity.health, "resource": entity.resource
-			})),
-			"action_results": this.results.filter(result => result.seat == seat),
-			"action_lifecycle": this.lifecycle.filter(result => result.seat == seat),
-			"self": {
-				"civ": players[seat].civ,
-				"state": players[seat].state,
-				"resources": players[seat].resources,
-				"population": players[seat].population,
-				"researched": players[seat].researched,
-				"research_queued": players[seat].research_queued
-			},
-			"own_entities": own.map(entity => ({
-				"handle": handles.get(entity.id),
-				"template": entity.template,
-				"classes": entity.classes,
-				"position": entity.position,
-				"health": entity.health,
-				"activity": entity.activity,
-				"idle": entity.idle,
-				"stance": entity.stance,
-				"carrying": entity.carrying,
-				"buildable": entity.buildable, "trainable": entity.trainable, "researchable": entity.researchable,
-				"foundation_progress": entity.foundation?.progress ?? null,
-				"holder": ownIDs.has(entity.holder) ? handles.get(entity.holder) : null,
-				"garrisoned": entity.garrisoned.filter(id => ownIDs.has(id)).map(id => handles.get(id)),
-				"queue": entity.queue.map(item => ({
-					"handle": this.QueueHandle(seat, entity.id, item.id),
-					"paused": item.paused ?? false, "time_remaining_ms": item.timeRemaining ?? null,
-					"needed_population": item.neededSlots ?? null,
-					"unit_template": item.unitTemplate ?? null,
-					"technology": item.technologyTemplate ?? null,
-					"count": item.count ?? null,
-					"progress": item.progress ?? null
-				}))
-			}))
-		};
-	}
-	// Detach component-owned arrays and objects at the boundary.
 	return JSON.parse(JSON.stringify({
 		"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
-		"players": views,
+		"players": Object.fromEntries(seats.map(seat => [seat, this.observations.views[seat]])),
 		"evaluator": { "players": players, "entities": entities },
 		"action_results": this.results, "command_trace": this.commandTrace,
 		"action_lifecycle": this.lifecycle
 	}));
 };
 
-/** Public static rules plus effective values for the bound seat only. */
 BenchmarkInterface.prototype.GetCatalog = function(seat, names, technologies)
+{
+	return this.observations.Catalog(seat, names, technologies);
+};
+
+/** Public static rules plus effective values for the bound seat only. */
+BenchmarkInterface.prototype.BuildCatalog = function(seat, names, technologies)
 {
 	const templateManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
 	const player = this.GetPlayer(seat);
 	const permitted = new Set();
 	for (const id of Engine.GetEntitiesWithInterface(IID_Ownership))
-		if (Engine.QueryInterface(id, IID_Ownership).GetOwner() == seat)
+		if (BenchmarkActions.Owned(seat, id))
 		{
 			permitted.add(templateManager.GetCurrentTemplateName(id));
 			for (const iid of [IID_Builder, IID_Trainer])
@@ -239,7 +204,13 @@ BenchmarkInterface.prototype.ResolveHandle = function(seat, handle)
 
 BenchmarkInterface.prototype.QueueHandle = function(seat, entity, id)
 {
-	return this.Handle(seat, entity) + "-q-" + id;
+	if (!this.queueHandles.has(seat))
+		this.queueHandles.set(seat, new Map());
+	const handles = this.queueHandles.get(seat);
+	const key = entity + ":" + id;
+	if (!handles.has(key))
+		handles.set(key, "queue-" + (handles.size + 1));
+	return handles.get(key);
 };
 
 BenchmarkInterface.prototype.ResolveQueue = function(seat, entity, handle)
@@ -264,6 +235,7 @@ BenchmarkInterface.prototype.GetStatus = function(seats)
 BenchmarkInterface.prototype.PrepareDecision = function(json, seats, turn, decision)
 {
 	this.recording = true;
+	this.observations.BeginDecision();
 	this.results = [];
 	this.commandTrace = [];
 	this.lifecycle = [];
@@ -490,6 +462,7 @@ BenchmarkInterface.prototype.RecordQueueLifecycle = function(entity, id, event)
 
 BenchmarkInterface.prototype.OnGlobalDestroy = function(message)
 {
+	this.observations.Destroy(message.entity);
 	for (const record of this.trackedQueues.values())
 		if (record.producer == message.entity)
 			this.RecordQueueLifecycle(record.producer, record.id, "producer_lost");
@@ -506,6 +479,7 @@ BenchmarkInterface.prototype.OnGlobalDestroy = function(message)
 
 BenchmarkInterface.prototype.OnGlobalOwnershipChanged = function(message)
 {
+	this.observations.OwnershipChanged(message);
 	if (message.from == message.to)
 		return;
 	// Stop tracking when the producing entity leaves its original owner's control.
@@ -521,6 +495,11 @@ BenchmarkInterface.prototype.OnGlobalOwnershipChanged = function(message)
 			"event": "ownership_lost" });
 		this.foundations.delete(message.entity);
 	}
+};
+
+BenchmarkInterface.prototype.OnGlobalEntityRenamed = function(message)
+{
+	this.observations.Rename(message);
 };
 
 Engine.RegisterSystemComponentType(IID_BenchmarkInterface, "BenchmarkInterface", BenchmarkInterface);

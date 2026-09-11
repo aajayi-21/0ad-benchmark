@@ -36,12 +36,13 @@ class BenchmarkActions
 
 	static Owned(seat, id)
 	{
-		return Engine.QueryInterface(id, IID_Ownership)?.GetOwner() == seat;
+		return !Engine.QueryInterface(id, IID_Mirage) && Engine.QueryInterface(id, IID_Ownership)?.GetOwner() == seat;
 	}
 
 	static Visible(seat, id)
 	{
-		return Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager).GetLosVisibility(id, seat) == "visible";
+		return !Engine.QueryInterface(id, IID_Mirage) &&
+			Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager).GetLosVisibility(id, seat) == "visible";
 	}
 
 	static Translate(component, seat, action)

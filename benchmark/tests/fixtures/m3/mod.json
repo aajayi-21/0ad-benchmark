@@ -1,0 +1,7 @@
+{
+	"name": "m3_fixture",
+	"version": "0.1.0",
+	"label": "M3 visibility gate fixtures",
+	"description": "Replayable hidden-state pairs, visibility transitions and text-only scouting.",
+	"dependencies": ["agent_benchmark=0.3.0"]
+}

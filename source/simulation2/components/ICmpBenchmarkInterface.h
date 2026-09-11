@@ -29,6 +29,9 @@
 class ICmpBenchmarkInterface : public IComponent
 {
 public:
+	virtual void UpdateKnowledge(JS::MutableHandleValue ret, const std::vector<int>& seats, uint32_t turn) = 0;
+	virtual void FreezeObservation(JS::MutableHandleValue ret, const std::vector<int>& seats, const std::string& episode) = 0;
+	virtual void Inspect(JS::MutableHandleValue ret, int seat, const std::string& query) = 0;
 	virtual void GetSnapshot(JS::MutableHandleValue ret, const std::vector<int>& seats) = 0;
 	virtual void GetCatalog(JS::MutableHandleValue ret, int seat,
 		const std::vector<std::string>& names, const std::vector<std::string>& technologies) = 0;

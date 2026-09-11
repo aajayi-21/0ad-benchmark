@@ -29,6 +29,21 @@ class CCmpBenchmarkInterfaceScripted : public ICmpBenchmarkInterface
 public:
 	DEFAULT_SCRIPT_WRAPPER(BenchmarkInterfaceScripted)
 
+	void UpdateKnowledge(JS::MutableHandleValue ret, const std::vector<int>& seats, uint32_t turn) override
+	{
+		m_Script.CallRef("UpdateKnowledge", ret, seats, turn);
+	}
+
+	void FreezeObservation(JS::MutableHandleValue ret, const std::vector<int>& seats, const std::string& episode) override
+	{
+		m_Script.CallRef("FreezeObservation", ret, seats, episode);
+	}
+
+	void Inspect(JS::MutableHandleValue ret, int seat, const std::string& query) override
+	{
+		m_Script.CallRef("Inspect", ret, seat, query);
+	}
+
 	void GetSnapshot(JS::MutableHandleValue ret, const std::vector<int>& seats) override
 	{
 		m_Script.CallRef("GetSnapshot", ret, seats);

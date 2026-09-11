@@ -205,7 +205,7 @@ struct BenchmarkInterface::Impl
 		// IDs and error strings passed here contain no JSON metacharacters.
 		std::lock_guard lock(mutex);
 		return {status, fmt::format(
-			R"({{"protocol_version":"1.1","episode_id":"{}","request_id":"{}","turn":{},"sim_time_ms":{},"state":"{}","ok":{},"data":{},"error":{}}})",
+			R"({{"protocol_version":"1.2","episode_id":"{}","request_id":"{}","turn":{},"sim_time_ms":{},"state":"{}","ok":{},"data":{},"error":{}}})",
 			includeEpisode ? episode : "", id, includeEpisode ? turn : 0, includeEpisode ? timeMs : 0,
 			includeEpisode ? state : "unavailable", status < 400 ? "true" : "false", data,
 			code.empty() ? "null" : fmt::format(R"({{"code":"{}","message":"{}"}})", code, message))};
@@ -237,8 +237,8 @@ struct BenchmarkInterface::Impl
 			Script::ParseJSON(rq, engineInfo, &info);
 			Script::SetProperty(rq, info, "build_version", utf8_from_wstring(build_version));
 			Script::SetProperty(rq, info, "capabilities", std::vector<std::string>{
-				"reset", "observe", "catalog", "advance_wait", "advance_actions", "finalize", "shutdown"});
-			Script::SetProperty(rq, info, "player_coverage", std::string("current_targets_m2"));
+				"reset", "observe", "inspect", "catalog", "advance_wait", "advance_actions", "finalize", "shutdown"});
+			Script::SetProperty(rq, info, "player_coverage", std::string("turn_memory_m3"));
 			healthData = Script::StringifyJSON(rq, &info, false);
 		}
 
@@ -269,7 +269,7 @@ struct BenchmarkInterface::Impl
 			response.set_content(result.body, "application/json");
 		};
 		server->Get("/benchmark/v1/health", handler);
-		for (const char* operation : {"reset", "observe", "catalog", "advance", "finalize", "shutdown"})
+		for (const char* operation : {"reset", "observe", "inspect", "catalog", "advance", "finalize", "shutdown"})
 			server->Post(std::string("/benchmark/v1/") + operation, handler);
 		server->set_error_handler([this](const httplib::Request&, httplib::Response& response) {
 			if (response.body.empty())
@@ -333,6 +333,18 @@ struct BenchmarkInterface::Impl
 			throw RequestError(504, "request_timeout", "Operation exceeded its deadline");
 	}
 
+	void UpdateKnowledge()
+	{
+		Script::Request rq(g_Game->GetSimulation2()->GetScriptInterface());
+		CmpPtr<ICmpBenchmarkInterface> component(*g_Game->GetSimulation2(), SYSTEM_ENTITY);
+		if (!component)
+			throw RequestError(500, "missing_mod", "The agent_benchmark mod is required");
+		JS::RootedValue result(rq.cx);
+		component->UpdateKnowledge(&result, seats, g_Game->GetTurnManager()->GetCurrentTurn());
+		if (!result.isBoolean() || !result.toBoolean())
+			throw RequestError(500, "observation_failed", "Could not capture player knowledge");
+	}
+
 	void RefreshSnapshot()
 	{
 		Script::Request rq(g_Game->GetSimulation2()->GetScriptInterface());
@@ -340,6 +352,9 @@ struct BenchmarkInterface::Impl
 		if (!component)
 			throw RequestError(500, "missing_mod", "The agent_benchmark mod is required");
 		JS::RootedValue value(rq.cx);
+		component->FreezeObservation(&value, seats, episode);
+		if (!value.isBoolean() || !value.toBoolean())
+			throw RequestError(500, "snapshot_failed", "Could not freeze player observations");
 		component->GetSnapshot(&value, seats);
 		if (!value.isObject())
 			throw RequestError(500, "snapshot_failed", "Could not build benchmark observations");
@@ -372,7 +387,17 @@ struct BenchmarkInterface::Impl
 
 	void Reset(const Script::Request& rq, JS::HandleValue body, const Job& job)
 	{
-		Keys(rq, body, {"attributes", "seats", "save_replay", "turn_limit"});
+		Keys(rq, body, {"attributes", "seats", "save_replay", "turn_limit", "information_mode", "objective"});
+		JS::RootedValue requestedMode(rq.cx);
+		Script::GetProperty(rq, body, "information_mode", &requestedMode);
+		const std::string informationMode = requestedMode.isUndefined() ? "partial" : StringField(rq, body, "information_mode");
+		if (informationMode != "partial" && informationMode != "full")
+			throw RequestError(400, "invalid_information_mode", "Information mode must be partial or full");
+		JS::RootedValue requestedObjective(rq.cx);
+		Script::GetProperty(rq, body, "objective", &requestedObjective);
+		const std::string objective = requestedObjective.isUndefined() ? "Play under the listed victory conditions until the turn limit." : StringField(rq, body, "objective");
+		if (objective.empty() || objective.size() > 1000)
+			throw RequestError(400, "invalid_objective", "A public objective must contain 1 to 1000 bytes");
 		JS::RootedValue requestedLimit(rq.cx);
 		Script::GetProperty(rq, body, "turn_limit", &requestedLimit);
 		const uint32_t newLimit = requestedLimit.isUndefined() ? 12000 : IntField(rq, body, "turn_limit", 1, 12000);
@@ -398,6 +423,7 @@ struct BenchmarkInterface::Impl
 		uint32_t count;
 		if (!JS::GetArrayLength(rq.cx, playerArray, &count) || count < 1 || count > 8)
 			throw RequestError(400, "invalid_attributes", "Between one and eight players are required");
+		std::set<int> teams;
 		for (uint32_t i = 0; i < count; ++i)
 		{
 			JS::RootedValue player(rq.cx);
@@ -416,6 +442,26 @@ struct BenchmarkInterface::Impl
 				const std::string behavior = StringField(rq, player, "AIBehavior");
 				if (behavior != "random" && behavior != "balanced" && behavior != "aggressive" && behavior != "defensive")
 					throw RequestError(400, "invalid_attributes", "Invalid Petra behavior");
+			}
+			JS::RootedValue team(rq.cx);
+			Script::GetProperty(rq, player, "Team", &team);
+			if (informationMode == "partial" && !team.isUndefined())
+			{
+				const int number = IntField(rq, player, "Team", -1, 8);
+				if (number >= 0 && !teams.insert(number).second)
+					throw RequestError(400, "unsupported_visibility", "Partial mode requires opposing teams");
+			}
+		}
+		if (informationMode == "partial")
+		{
+			for (const char* key : {"RevealMap", "AllyView", "LockTeams"})
+			{
+				JS::RootedValue value(rq.cx);
+				Script::GetProperty(rq, settings, key, &value);
+				const bool required = std::string(key) == "LockTeams";
+				if (!value.isUndefined() && (!value.isBoolean() || value.toBoolean() != required))
+					throw RequestError(400, "unsupported_visibility", "Partial mode requires locked teams without reveal or shared LOS");
+				Script::SetProperty(rq, settings, key, required);
 			}
 		}
 		Script::GetProperty(rq, body, "seats", &requestedSeats);
@@ -446,7 +492,9 @@ struct BenchmarkInterface::Impl
 		if (type == "random")
 			Script::SetProperty(rq, attributes, "script", map.substr(std::string("maps/random/").size()) + ".js");
 		JS::RootedValue benchmarkConfig(rq.cx);
-		Script::ParseJSON(rq, fmt::format(R"({{"protocol_version":"1.1","turn_limit":{},"actions_per_seat":20,"group_size":64,"train_batch":5}})", newLimit), &benchmarkConfig);
+		Script::ParseJSON(rq, fmt::format(R"({{"protocol_version":"1.2","observation_schema":"1.0","turn_limit":{},"actions_per_seat":20,"group_size":64,"train_batch":5,"map_cell_size":16}})", newLimit), &benchmarkConfig);
+		Script::SetProperty(rq, benchmarkConfig, "information_mode", informationMode);
+		Script::SetProperty(rq, benchmarkConfig, "objective", objective);
 		Script::SetProperty(rq, benchmarkConfig, "seats", std::vector<int>(uniqueSeats.begin(), uniqueSeats.end()));
 		Script::SetProperty(rq, attributes, "benchmark", benchmarkConfig);
 		const std::string config = Script::StringifyJSON(rq, &attributes, false);
@@ -496,6 +544,7 @@ struct BenchmarkInterface::Impl
 				throw RequestError(500, "load_failed", "The game could not be started");
 			replayDirectory = g_Game->GetReplayLogger().GetDirectory().string8();
 			CheckTerminal();
+			UpdateKnowledge();
 			RefreshSnapshot();
 			HashBoundary(false);
 			if (g_Logger->GetNumberOfErrors() != errorsBefore)
@@ -584,6 +633,27 @@ struct BenchmarkInterface::Impl
 						throw RequestError(400, "invalid_audience", "Audience must be player or evaluator");
 					result = Script::StringifyJSON(rq, &selection, false);
 				}
+				else if (job.operation == "inspect")
+				{
+					Keys(rq, body, {"episode_id", "seat", "observation_id", "kind", "handles", "bounds", "section", "cursor", "limit", "max_chars"});
+					const int seat = BoundSeat(rq, body);
+					const std::string query = Script::StringifyJSON(rq, &body, false);
+					Script::Request simulationRequest(g_Game->GetSimulation2()->GetScriptInterface());
+					JS::RootedValue inspection(simulationRequest.cx);
+					CmpPtr<ICmpBenchmarkInterface> component(*g_Game->GetSimulation2(), SYSTEM_ENTITY);
+					const int errorsBefore = g_Logger->GetNumberOfErrors();
+					component->Inspect(&inspection, seat, query);
+					if (!inspection.isObject() || g_Logger->GetNumberOfErrors() != errorsBefore)
+						throw RequestError(500, "inspection_failed", "Could not inspect the observation");
+					JS::RootedValue failure(simulationRequest.cx);
+					Script::GetProperty(simulationRequest, inspection, "error", &failure);
+					if (!failure.isUndefined())
+					{
+						const std::string error = StringField(simulationRequest, inspection, "error");
+						throw RequestError(error == "stale_observation" ? 409 : 400, error, "Inspection query rejected");
+					}
+					result = Script::StringifyJSON(simulationRequest, &inspection, false);
+				}
 				else if (job.operation == "catalog")
 				{
 					Keys(rq, body, {"episode_id", "seat", "templates", "technologies"});
@@ -629,6 +699,7 @@ struct BenchmarkInterface::Impl
 							if (manager->GetCurrentTurn() != before + 1)
 								throw RequestError(500, "advance_failed", "The engine did not complete one turn");
 							CheckTerminal();
+							UpdateKnowledge();
 							if (g_Logger->GetNumberOfErrors() != errorsBefore)
 								throw RequestError(500, "advance_failed", "The engine reported errors during advance");
 						}

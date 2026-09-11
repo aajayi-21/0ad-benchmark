@@ -3,14 +3,12 @@
 import concurrent.futures
 import json
 import os
-import re
-import shutil
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from benchmark.tests.test_m1_interface import CONFIG, ENGINE, EngineProcess
+from benchmark.tests.replay_helpers import verify_replay
+from benchmark.tests.test_m1_interface import CONFIG, EngineProcess
 
 
 FIXTURES = Path(__file__).parent / "fixtures/m2"
@@ -97,34 +95,7 @@ class TestM2Actions(unittest.TestCase):
 
     def replay(self):
         final = self.ok("finalize", {"episode_id": self.response["episode_id"]})
-        replay = Path(final["data"]["replay_directory"]) / "commands.txt"
-        text = replay.read_text()
-        self.assertIn('"type":"benchmark-action"', text)
-        self.assertEqual(len(re.findall(r"^turn ", text, re.MULTILINE)), final["turn"])
-        self.assertTrue(replay.with_name("metadata.json").is_file())
-        profile = self.directory / "replay"
-        profile.mkdir()
-        env = self.engine.env.copy()
-        for key in ("DATA", "CONFIG", "CACHE", "STATE"):
-            env[f"XDG_{key}_HOME"] = str(profile / key.lower())
-        shutil.copytree(FIXTURES, profile / "data/0ad/mods/m2_fixture")
-        log_path = profile / "replay.log"
-        with log_path.open("w") as log:
-            result = subprocess.run(
-                [str(ENGINE), f"--replay={replay}", "--hashtest-full=true"],
-                env=env,
-                cwd=profile,
-                stdout=log,
-                stderr=log,
-                timeout=120,
-                check=False,
-            )
-        log = log_path.read_text()
-        self.assertEqual(result.returncode, 0, log[-3000:])
-        self.assertNotIn("MISMATCH", log)
-        self.assertNotIn("ERROR:", log)
-        self.assertEqual(log.count("hash ok"), len(re.findall(r"^hash ", text, re.MULTILINE)))
-        self.assertIn("# Final state: " + final["data"]["state_hash"], log)
+        verify_replay(self, self.engine, final, self.directory, FIXTURES)
 
     def test_scripted_action_gate_and_replay(self):
         self.reset()
