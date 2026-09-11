@@ -5787,6 +5787,9 @@ UnitAI.prototype.ComputeWalkingDistance = function()
 
 UnitAI.prototype.AddOrder = function(type, data, queued, pushFront)
 {
+	// Optional benchmark accounting observes order dispatch, not eventual task completion.
+	Engine.QueryInterface(SYSTEM_ENTITY, IID_BenchmarkInterface)?.RecordOrder(this.entity, type);
+
 	if (this.expectedRoute)
 		this.expectedRoute = undefined;
 

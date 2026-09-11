@@ -32,6 +32,9 @@ public:
 	virtual void GetSnapshot(JS::MutableHandleValue ret, const std::vector<int>& seats) = 0;
 	virtual void GetCatalog(JS::MutableHandleValue ret, int seat,
 		const std::vector<std::string>& names, const std::vector<std::string>& technologies) = 0;
+	virtual void GetStatus(JS::MutableHandleValue ret, const std::vector<int>& seats) = 0;
+	virtual void PrepareDecision(JS::MutableHandleValue ret, const std::string& batches,
+		const std::vector<int>& seats, uint32_t turn, uint32_t decision) = 0;
 
 	DECLARE_INTERFACE_TYPE(BenchmarkInterface)
 };

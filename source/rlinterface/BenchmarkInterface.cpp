@@ -30,6 +30,7 @@
 #include "ps/GameSetup/GameSetup.h"
 #include "ps/Loader.h"
 #include "ps/Replay.h"
+#include "ps/Util.h"
 #include "ps/scripting/JSInterface_Mod.h"
 #include "scriptinterface/Interface.h"
 #include "scriptinterface/JSON.h"
@@ -39,6 +40,7 @@
 #include "simulation2/components/ICmpBenchmarkInterface.h"
 #include "simulation2/system/Component.h"
 #include "simulation2/system/TurnManager.h"
+#include "simulation2/system/LocalTurnManager.h"
 
 #include <algorithm>
 #include <chrono>
@@ -189,7 +191,10 @@ struct BenchmarkInterface::Impl
 	Script::Interface script{"Engine", "benchmark-transport", *g_ScriptContext};
 	std::vector<int> seats;
 	std::string snapshot, replayDirectory, finalData;
-	std::string healthData;
+	std::string healthData, stateHash, stopReason;
+	uint32_t turnLimit = 12000, decision = 0;
+	std::deque<std::string> receiptOrder;
+	std::set<std::string> expiredReceipts;
 	std::map<std::string, CachedResponse> completed;
 	size_t cacheBytes = 0;
 	bool quit = false;
@@ -200,7 +205,7 @@ struct BenchmarkInterface::Impl
 		// IDs and error strings passed here contain no JSON metacharacters.
 		std::lock_guard lock(mutex);
 		return {status, fmt::format(
-			R"({{"protocol_version":"1.0","episode_id":"{}","request_id":"{}","turn":{},"sim_time_ms":{},"state":"{}","ok":{},"data":{},"error":{}}})",
+			R"({{"protocol_version":"1.1","episode_id":"{}","request_id":"{}","turn":{},"sim_time_ms":{},"state":"{}","ok":{},"data":{},"error":{}}})",
 			includeEpisode ? episode : "", id, includeEpisode ? turn : 0, includeEpisode ? timeMs : 0,
 			includeEpisode ? state : "unavailable", status < 400 ? "true" : "false", data,
 			code.empty() ? "null" : fmt::format(R"({{"code":"{}","message":"{}"}})", code, message))};
@@ -232,8 +237,8 @@ struct BenchmarkInterface::Impl
 			Script::ParseJSON(rq, engineInfo, &info);
 			Script::SetProperty(rq, info, "build_version", utf8_from_wstring(build_version));
 			Script::SetProperty(rq, info, "capabilities", std::vector<std::string>{
-				"reset", "observe", "catalog", "advance_wait", "finalize", "shutdown"});
-			Script::SetProperty(rq, info, "player_coverage", std::string("owned_only_m1"));
+				"reset", "observe", "catalog", "advance_wait", "advance_actions", "finalize", "shutdown"});
+			Script::SetProperty(rq, info, "player_coverage", std::string("current_targets_m2"));
 			healthData = Script::StringifyJSON(rq, &info, false);
 		}
 
@@ -347,7 +352,7 @@ struct BenchmarkInterface::Impl
 		std::lock_guard lock(mutex);
 		turn = g_Game->GetTurnManager()->GetCurrentTurn();
 		timeMs = static_cast<uint64_t>(time);
-		state = g_Game->IsGameFinished() ? "terminal" : "running";
+		state = stopReason.empty() ? "running" : "terminal";
 	}
 
 	std::string FullData()
@@ -356,12 +361,21 @@ struct BenchmarkInterface::Impl
 		JS::RootedValue data(rq.cx);
 		Script::ParseJSON(rq, snapshot, &data);
 		Script::SetProperty(rq, data, "replay_directory", replayDirectory);
+		Script::SetProperty(rq, data, "state_hash", stateHash);
+		Script::SetProperty(rq, data, "stop_reason", stopReason);
+		Script::SetProperty(rq, data, "terminated", stopReason == "game_end");
+		Script::SetProperty(rq, data, "truncated", stopReason == "turn_limit");
+		Script::SetProperty(rq, data, "turn_limit", turnLimit);
+		Script::SetProperty(rq, data, "next_decision_id", decision);
 		return Script::StringifyJSON(rq, &data, false);
 	}
 
 	void Reset(const Script::Request& rq, JS::HandleValue body, const Job& job)
 	{
-		Keys(rq, body, {"attributes", "seats", "save_replay"});
+		Keys(rq, body, {"attributes", "seats", "save_replay", "turn_limit"});
+		JS::RootedValue requestedLimit(rq.cx);
+		Script::GetProperty(rq, body, "turn_limit", &requestedLimit);
+		const uint32_t newLimit = requestedLimit.isUndefined() ? 12000 : IntField(rq, body, "turn_limit", 1, 12000);
 		JS::RootedValue attributes(rq.cx), settings(rq.cx), players(rq.cx), requestedSeats(rq.cx), replay(rq.cx);
 		if (!Script::GetProperty(rq, body, "attributes", &attributes) || !attributes.isObject() ||
 			!Script::GetProperty(rq, attributes, "settings", &settings) || !settings.isObject())
@@ -431,6 +445,10 @@ struct BenchmarkInterface::Impl
 		Script::SetProperty(rq, attributes, "mods", mods);
 		if (type == "random")
 			Script::SetProperty(rq, attributes, "script", map.substr(std::string("maps/random/").size()) + ".js");
+		JS::RootedValue benchmarkConfig(rq.cx);
+		Script::ParseJSON(rq, fmt::format(R"({{"protocol_version":"1.1","turn_limit":{},"actions_per_seat":20,"group_size":64,"train_batch":5}})", newLimit), &benchmarkConfig);
+		Script::SetProperty(rq, benchmarkConfig, "seats", std::vector<int>(uniqueSeats.begin(), uniqueSeats.end()));
+		Script::SetProperty(rq, attributes, "benchmark", benchmarkConfig);
 		const std::string config = Script::StringifyJSON(rq, &attributes, false);
 		EndGame();
 		seats.assign(uniqueSeats.begin(), uniqueSeats.end());
@@ -439,6 +457,12 @@ struct BenchmarkInterface::Impl
 		replayDirectory.clear();
 		completed.clear();
 		cacheBytes = 0;
+		receiptOrder.clear();
+		expiredReceipts.clear();
+		turnLimit = newLimit;
+		decision = 0;
+		stopReason.clear();
+		stateHash.clear();
 		{
 			std::lock_guard lock(mutex);
 			episode = NewEpisodeID();
@@ -471,7 +495,9 @@ struct BenchmarkInterface::Impl
 			if (g_Game->ReallyStartGame() != PSRETURN_OK)
 				throw RequestError(500, "load_failed", "The game could not be started");
 			replayDirectory = g_Game->GetReplayLogger().GetDirectory().string8();
+			CheckTerminal();
 			RefreshSnapshot();
+			HashBoundary(false);
 			if (g_Logger->GetNumberOfErrors() != errorsBefore)
 				throw RequestError(500, "load_failed", "The engine reported errors while initializing observations");
 		}
@@ -500,7 +526,12 @@ struct BenchmarkInterface::Impl
 		}
 		if (state == "failed")
 			throw RequestError(503, "process_failed", "Restart this process after a failed load or advance");
+		// Old-episode receipts must never be returned as current observations.
+		if (job.operation != "reset" && (episode.empty() || StringField(rq, body, "episode_id") != episode))
+			throw RequestError(409, "stale_episode", "The request does not match the current episode");
 		const std::string cacheKey = job.operation + ":" + job.id;
+		if (expiredReceipts.contains(cacheKey))
+			throw RequestError(410, "receipt_expired", "This request completed earlier and will not run again");
 		if (auto found = completed.find(cacheKey); found != completed.end())
 		{
 			if (found->second.request != job.body)
@@ -509,8 +540,6 @@ struct BenchmarkInterface::Impl
 		}
 		// Finalize is idempotent by lifecycle state and remains available at the cache limit.
 		const bool mutation = job.operation == "reset" || job.operation == "advance";
-		if (job.operation == "advance" && (completed.size() >= 256 || cacheBytes >= MAX_CACHE_BYTES))
-			throw RequestError(429, "request_limit", "Reset before exceeding the M1 mutation request limit");
 		std::string result;
 		if (job.operation == "reset")
 		{
@@ -572,17 +601,25 @@ struct BenchmarkInterface::Impl
 				}
 				else if (job.operation == "advance")
 				{
-					// M1 only permits waiting so observation noninterference can be verified with Petra.
-					Keys(rq, body, {"episode_id", "expected_turn", "turns"});
+					Keys(rq, body, {"episode_id", "expected_turn", "turns", "decision_id", "batches"});
 					if (state == "terminal")
 						throw RequestError(409, "terminal", "The episode has ended");
 					if (IntField(rq, body, "expected_turn", 0, 1000000) != static_cast<int>(turn))
 						throw RequestError(409, "stale_turn", "The expected turn does not match");
 					const int count = IntField(rq, body, "turns", 1, 300);
+					JS::RootedValue requestedDecision(rq.cx), batches(rq.cx);
+					Script::GetProperty(rq, body, "decision_id", &requestedDecision);
+					Script::GetProperty(rq, body, "batches", &batches);
+					if ((!batches.isUndefined() || !requestedDecision.isUndefined()) &&
+						IntField(rq, body, "decision_id", 0, 12000) != static_cast<int>(decision))
+						throw RequestError(409, "stale_decision", "The decision ID does not match");
+					const std::string batchJSON = batches.isUndefined() ? "" : Script::StringifyJSON(rq, &batches, false);
 					try
 					{
 						const int errorsBefore = g_Logger->GetNumberOfErrors();
-						for (int i = 0; i < count && !g_Game->IsGameFinished(); ++i)
+						Schedule(batchJSON);
+						++decision;
+						for (int i = 0; i < count && stopReason.empty(); ++i)
 						{
 							CheckDeadline(job);
 							auto* manager = g_Game->GetTurnManager();
@@ -591,10 +628,12 @@ struct BenchmarkInterface::Impl
 								[](const std::string&, const std::optional<JS::HandleValueArray>) {});
 							if (manager->GetCurrentTurn() != before + 1)
 								throw RequestError(500, "advance_failed", "The engine did not complete one turn");
+							CheckTerminal();
 							if (g_Logger->GetNumberOfErrors() != errorsBefore)
 								throw RequestError(500, "advance_failed", "The engine reported errors during advance");
 						}
 						RefreshSnapshot();
+						HashBoundary(true);
 						if (g_Logger->GetNumberOfErrors() != errorsBefore)
 							throw RequestError(500, "snapshot_failed", "The engine reported errors while building observations");
 					}
@@ -612,8 +651,73 @@ struct BenchmarkInterface::Impl
 		{
 			completed[cacheKey] = {job.body, response};
 			cacheBytes += job.body.size() + response.body.size();
+			receiptOrder.push_back(cacheKey);
+			while (receiptOrder.size() > 8 || (cacheBytes > MAX_CACHE_BYTES && receiptOrder.size() > 1))
+			{
+				const std::string oldest = receiptOrder.front();
+				receiptOrder.pop_front();
+				const auto& old = completed.at(oldest);
+				cacheBytes -= old.request.size() + old.response.body.size();
+				completed.erase(oldest);
+				expiredReceipts.insert(oldest);
+			}
 		}
 		return response;
+	}
+
+	// Submit through the same local turn/replay path as ordinary player commands.
+	void Schedule(const std::string& batches)
+	{
+		Script::Request rq(g_Game->GetSimulation2()->GetScriptInterface());
+		CmpPtr<ICmpBenchmarkInterface> component(*g_Game->GetSimulation2(), SYSTEM_ENTITY);
+		JS::RootedValue commands(rq.cx);
+		component->PrepareDecision(&commands, batches, seats, turn, decision);
+		bool array = false;
+		if (!commands.isObject() || !JS::IsArrayObject(rq.cx, commands, &array) || !array)
+			throw RequestError(500, "actions_failed", "Could not prepare actions");
+		JS::RootedObject items(rq.cx, &commands.toObject());
+		uint32_t length;
+		if (!JS::GetArrayLength(rq.cx, items, &length) || length > 160)
+			throw RequestError(500, "actions_failed", "Invalid prepared action count");
+		// Startup rejects networking and replay modes; CGame owns a local turn manager.
+		auto* manager = static_cast<CLocalTurnManager*>(g_Game->GetTurnManager());
+		for (uint32_t i = 0; i < length; ++i)
+		{
+			JS::RootedValue item(rq.cx), command(rq.cx);
+			JS_GetElement(rq.cx, items, i, &item);
+			const int seat = BoundSeat(rq, item);
+			Script::GetProperty(rq, item, "command", &command);
+			manager->PostCommand(seat, command);
+		}
+	}
+
+	void CheckTerminal()
+	{
+		Script::Request rq(g_Game->GetSimulation2()->GetScriptInterface());
+		CmpPtr<ICmpBenchmarkInterface> component(*g_Game->GetSimulation2(), SYSTEM_ENTITY);
+		JS::RootedValue status(rq.cx);
+		component->GetStatus(&status, seats);
+		bool ended;
+		double milliseconds;
+		const uint32_t current = g_Game->GetTurnManager()->GetCurrentTurn();
+		if (!Script::GetProperty(rq, status, "ended", ended) ||
+			!Script::GetProperty(rq, status, "sim_time_ms", milliseconds) ||
+			milliseconds != static_cast<double>(current) * DEFAULT_TURN_LENGTH)
+			throw RequestError(500, "advance_failed", "Simulation turn and time disagree");
+		if (ended)
+			stopReason = "game_end";
+		else if (current >= turnLimit)
+			stopReason = "turn_limit";
+	}
+
+	void HashBoundary(bool record)
+	{
+		std::string hash;
+		if (!g_Game->GetSimulation2()->ComputeStateHash(hash, false))
+			throw RequestError(500, "hash_failed", "Could not hash simulation state");
+		stateHash = Hexify(hash);
+		if (record)
+			g_Game->GetReplayLogger().Hash(hash, false);
 	}
 
 	int BoundSeat(const Script::Request& rq, JS::HandleValue body)

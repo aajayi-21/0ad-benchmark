@@ -397,7 +397,7 @@ var g_Commands = {
 
 	"construct": function(player, cmd, data)
 	{
-		TryConstructBuilding(player, data.cmpPlayer, data.controlAllUnits, cmd);
+		return TryConstructBuilding(player, data.cmpPlayer, data.controlAllUnits, cmd);
 	},
 
 	"construct-wall": function(player, cmd, data)
@@ -934,9 +934,14 @@ var g_Commands = {
 
 function ProcessCommand(player, cmd)
 {
+	const benchmark = Engine.QueryInterface(SYSTEM_ENTITY, IID_BenchmarkInterface);
+	if (cmd.type == "benchmark-action")
+		return benchmark?.ExecuteAction(player, cmd);
+	benchmark?.RecordCommand(player, cmd);
+
 	const cmpPlayer = QueryPlayerIDInterface(player);
 	if (!cmpPlayer)
-		return;
+		return undefined;
 
 	const data = {
 		"cmpPlayer": cmpPlayer,
@@ -980,10 +985,10 @@ function ProcessCommand(player, cmd)
 	{
 		var cmpTrigger = Engine.QueryInterface(SYSTEM_ENTITY, IID_Trigger);
 		cmpTrigger.CallEvent("OnPlayerCommand", { "player": player, "cmd": cmd });
-		g_Commands[cmd.type](player, cmd, data);
+		return g_Commands[cmd.type](player, cmd, data);
 	}
-	else
-		error("Invalid command: unknown command type: "+uneval(cmd));
+	error("Invalid command: unknown command type: "+uneval(cmd));
+	return undefined;
 }
 
 /**

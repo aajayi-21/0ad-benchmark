@@ -1,0 +1,7 @@
+{
+	"name": "m2_fixture",
+	"version": "0.1.0",
+	"label": "M2 action gate fixtures",
+	"description": "Small deterministic action and replay tests.",
+	"dependencies": ["agent_benchmark=0.2.0"]
+}
