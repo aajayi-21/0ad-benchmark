@@ -141,7 +141,7 @@ class TestM1Interface(unittest.TestCase):
         status, response = self.engine.call(operation, data, **kwargs)
         self.assertEqual(status, 200, response)
         self.assertTrue(response["ok"], response)
-        self.assertEqual(response["protocol_version"], "1.1")
+        self.assertEqual(response["protocol_version"], "1.2")
         return response
 
     def reset(self, seats=(1,), config=None):
@@ -201,7 +201,8 @@ class TestM1Interface(unittest.TestCase):
         self.assertGreater(len(second["data"]["own_entities"]), 0)
         self.assertTrue(
             all(
-                "id" not in entity and "orders" not in entity
+                "id" not in entity
+                and all(set(order) == {"type", "target", "position"} for order in entity["orders"])
                 for entity in second["data"]["own_entities"]
             )
         )

@@ -1,6 +1,6 @@
 {
 	"name": "agent_benchmark",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"label": "Strategic agent benchmark",
 	"description": "Independent observations and a private benchmark engine bridge.",
 	"dependencies": ["0ad=0.29.0"]
