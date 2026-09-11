@@ -39,6 +39,17 @@ public:
 	{
 		m_Script.CallRef("GetCatalog", ret, seat, names, technologies);
 	}
+
+	void GetStatus(JS::MutableHandleValue ret, const std::vector<int>& seats) override
+	{
+		m_Script.CallRef("GetStatus", ret, seats);
+	}
+
+	void PrepareDecision(JS::MutableHandleValue ret, const std::string& batches,
+		const std::vector<int>& seats, uint32_t turn, uint32_t decision) override
+	{
+		m_Script.CallRef("PrepareDecision", ret, batches, seats, turn, decision);
+	}
 };
 
 REGISTER_COMPONENT_SCRIPT_WRAPPER(BenchmarkInterfaceScripted)

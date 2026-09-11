@@ -360,6 +360,7 @@ ProductionQueue.prototype.RemoveItem = function(id)
 		return;
 
 	this.queue.splice(itemIndex, 1)[0].Stop();
+	Engine.QueryInterface(SYSTEM_ENTITY, IID_BenchmarkInterface)?.RecordQueueLifecycle(this.entity, id, "cancelled");
 
 	Engine.PostMessage(this.entity, MT_ProductionQueueChanged, null);
 
@@ -433,6 +434,7 @@ ProductionQueue.prototype.ProgressTimeout = function(data, lateness)
 		}
 
 		this.queue.shift();
+		Engine.QueryInterface(SYSTEM_ENTITY, IID_BenchmarkInterface)?.RecordQueueLifecycle(this.entity, item.id, "production_finished");
 		Engine.PostMessage(this.entity, MT_ProductionQueueChanged, null);
 
 		// If autoqueuing, push a new unit on the queue immediately,

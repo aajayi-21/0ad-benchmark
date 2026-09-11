@@ -24,7 +24,7 @@ FIXTURES = Path(__file__).parent / "fixtures/m1"
 class EngineProcess:
     """Own one bounded engine process and an isolated writable game profile."""
 
-    def __init__(self, directory, port=None, extra_args=(), benchmark_mod=True):
+    def __init__(self, directory, port=None, extra_args=(), benchmark_mod=True, fixtures=FIXTURES):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.token = secrets.token_hex(24)
@@ -41,8 +41,9 @@ class EngineProcess:
         for key in ("DATA", "CONFIG", "CACHE", "STATE"):
             self.env[f"XDG_{key}_HOME"] = str(self.directory / key.lower())
         self.env["ZERO_AD_BENCHMARK_TOKEN"] = self.token
-        fixture_target = self.directory / "data/0ad/mods/m1_fixture"
-        shutil.copytree(FIXTURES, fixture_target)
+        fixture_name = json.loads((fixtures / "mod.json").read_text())["name"]
+        fixture_target = self.directory / "data/0ad/mods" / fixture_name
+        shutil.copytree(fixtures, fixture_target)
         args = [
             str(ENGINE),
             "--autostart-nonvisual",
@@ -50,7 +51,7 @@ class EngineProcess:
             "--mod=public",
         ]
         if benchmark_mod:
-            args += ["--mod=agent_benchmark", "--mod=m1_fixture"]
+            args += ["--mod=agent_benchmark", f"--mod={fixture_name}"]
         args += list(extra_args)
         self.log_path = self.directory / "engine.log"
         self.log = self.log_path.open("w", encoding="utf-8")
@@ -127,6 +128,8 @@ class EngineProcess:
 class TestM1Interface(unittest.TestCase):
     def setUp(self):
         output = os.environ.get("ZERO_AD_TEST_OUTPUT")
+        if output:
+            Path(output).mkdir(parents=True, exist_ok=True)
         self.directory = Path(tempfile.mkdtemp(prefix="m1-", dir=output))
         print(f"\nEvidence: {self.directory}", flush=True)
         self.engine = EngineProcess(self.directory / "primary")
@@ -138,7 +141,7 @@ class TestM1Interface(unittest.TestCase):
         status, response = self.engine.call(operation, data, **kwargs)
         self.assertEqual(status, 200, response)
         self.assertTrue(response["ok"], response)
-        self.assertEqual(response["protocol_version"], "1.0")
+        self.assertEqual(response["protocol_version"], "1.1")
         return response
 
     def reset(self, seats=(1,), config=None):
@@ -467,20 +470,13 @@ class TestM1Interface(unittest.TestCase):
         first = {"episode_id": episode, "expected_turn": 0, "turns": 1}
         saved = self.ok("advance", first, request_id="receipt-first")
         turn = saved["turn"]
-        for _ in range(256):
-            status, result = self.engine.call(
-                "advance", {"episode_id": episode, "expected_turn": turn, "turns": 1}
-            )
-            if status == 429:
-                self.assertEqual(result["error"]["code"], "request_limit")
-                break
-            self.assertEqual(status, 200, result)
+        for _ in range(10):
+            result = self.ok("advance", {"episode_id": episode, "expected_turn": turn, "turns": 1})
             turn += 1
             self.assertEqual(result["turn"], turn)
-        else:
-            self.fail("Receipt cache did not enforce a limit")
+        status, expired = self.engine.call("advance", first, request_id="receipt-first")
+        self.assertEqual((status, expired["error"]["code"]), (410, "receipt_expired"))
         self.assertEqual(self.ok("health")["turn"], turn)
-        self.assertEqual(self.ok("advance", first, request_id="receipt-first"), saved)
         self.ok("finalize", {"episode_id": episode})
         fresh = self.reset()
         self.assertNotEqual(fresh["episode_id"], episode)
