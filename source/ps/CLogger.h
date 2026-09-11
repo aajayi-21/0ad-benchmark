@@ -69,6 +69,9 @@ public:
 	void WriteError  (const char* message);
 	void WriteWarning(const char* message);
 
+	// Thread-safe cumulative count, for detecting logged failures across an operation.
+	int GetNumberOfErrors();
+
 	// Render recent log messages onto the screen
 	void Render(CCanvas2D& canvas);
 

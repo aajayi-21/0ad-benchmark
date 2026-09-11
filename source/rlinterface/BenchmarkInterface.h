@@ -15,17 +15,29 @@
  * along with 0 A.D.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef INCLUDED_JSI_MOD
-#define INCLUDED_JSI_MOD
+#ifndef INCLUDED_BENCHMARKINTERFACE
+#define INCLUDED_BENCHMARKINTERFACE
 
-namespace JS { class Value; }
-namespace Script { class Request; class Interface; }
+#include <memory>
+#include <string>
 
-namespace JSI_Mod
+namespace RL
 {
-	// Shared engine/mod metadata for game attributes and replay compatibility.
-	JS::Value GetEngineInfo(const Script::Interface& scriptInterface);
-	void RegisterScriptFunctions(const Script::Request& rq);
+/** Private, headless-only benchmark transport. All simulation work runs in Poll(). */
+class BenchmarkInterface
+{
+public:
+	explicit BenchmarkInterface(const std::string& address);
+	~BenchmarkInterface();
+	BenchmarkInterface(const BenchmarkInterface&) = delete;
+	BenchmarkInterface& operator=(const BenchmarkInterface&) = delete;
+	void Poll();
+	bool ShouldQuit() const;
+
+private:
+	struct Impl;
+	std::unique_ptr<Impl> m_Impl;
+};
 }
 
-#endif // INCLUDED_JSI_MOD
+#endif // INCLUDED_BENCHMARKINTERFACE

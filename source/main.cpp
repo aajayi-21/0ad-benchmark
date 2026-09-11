@@ -79,6 +79,7 @@ that of Atlas depending on commandline parameters.
 #include "ps/VideoMode.h"
 #include "ps/XML/Xeromyces.h"
 #include "renderer/Renderer.h"
+#include "rlinterface/BenchmarkInterface.h"
 #include "rlinterface/RLInterface.h"
 #include "scriptinterface/JSON.h"
 #include "scriptinterface/Context.h"
@@ -528,7 +529,15 @@ static void RunGameOrAtlas(const std::span<const char* const> argv)
 		return;
 	}
 
-	if (args.Has("autostart-nonvisual") && args.Get("autostart").empty() && !args.Has("rl-interface") && !args.Has("autostart-client"))
+	if (args.Has("benchmark-interface") && (!args.Has("autostart-nonvisual") ||
+		args.Has("rl-interface") || args.Has("autostart") || args.Has("autostart-host") ||
+		args.Has("autostart-client") || args.Has("replay") || args.Has("replay-visual")))
+	{
+		LOGERROR("Benchmark mode requires headless operation without legacy RL, autostart, networking, or replay flags");
+		throw RL::SetupError{};
+	}
+
+	if (args.Has("autostart-nonvisual") && args.Get("autostart").empty() && !args.Has("rl-interface") && !args.Has("autostart-client") && !args.Has("benchmark-interface"))
 	{
 		LOGERROR("-autostart-nonvisual can't be used alone. A map with -autostart=\"TYPEDIR/MAPNAME\" is needed.");
 		return;
@@ -728,11 +737,15 @@ static void RunGameOrAtlas(const std::span<const char* const> argv)
 					else
 						return std::nullopt;
 				}()};
-			if (!isVisual && !InitNonVisual(args))
+			if (!isVisual && !args.Has("benchmark-interface") && !InitNonVisual(args))
 				g_Shutdown = ShutdownType::Quit;
 
 			try
 			{
+				std::unique_ptr<RL::BenchmarkInterface> benchmarkInterface;
+				if (g_Shutdown == ShutdownType::None && args.Has("benchmark-interface"))
+					benchmarkInterface = std::make_unique<RL::BenchmarkInterface>(args.Get("benchmark-interface"));
+
 				// MSVC doesn't support copy elision in ternary expressions. So we use a lambda instead.
 				std::optional<RL::Interface> rlInterface{[&]() -> std::optional<RL::Interface>
 					{
@@ -744,7 +757,13 @@ static void RunGameOrAtlas(const std::span<const char* const> argv)
 
 				while (g_Shutdown == ShutdownType::None)
 				{
-					if (isVisual)
+					if (benchmarkInterface)
+					{
+						benchmarkInterface->Poll();
+						if (benchmarkInterface->ShouldQuit())
+							QuitEngine(EXIT_SUCCESS);
+					}
+					else if (isVisual)
 					{
 #if CONFIG2_DAP_INTERFACE
 						Frame(rlInterface ? &*rlInterface : nullptr, fixedFrameFrequency,

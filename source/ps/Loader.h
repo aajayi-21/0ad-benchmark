@@ -245,6 +245,13 @@ void EndRegistering();
 // note: no special notification will be returned by PS::Loader::ProgressiveLoad.
 void Cancel();
 
+/**
+ * Cancel loading and release suspended tasks before their game is destroyed.
+ * Call on the main thread, only after ProgressiveLoad has returned or unwound;
+ * never from inside a loader task. Cancelling an asynchronous task may wait for it.
+ */
+void CancelAndClear();
+
 struct ProgressiveLoadResult
 {
 	/**

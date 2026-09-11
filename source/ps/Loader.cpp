@@ -142,6 +142,15 @@ void Cancel()
 	state = IDLE;
 }
 
+void CancelAndClear()
+{
+	Cancel();
+	// A suspended task can own a Future borrowing state from a queued loader.
+	// Destroy it first, while those owners and the game still exist.
+	currentTask.reset();
+	load_requests.clear();
+}
+
 namespace
 {
 // helper routine for PS::Loader::ProgressiveLoad.
