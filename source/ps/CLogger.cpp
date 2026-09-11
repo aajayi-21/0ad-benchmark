@@ -131,6 +131,12 @@ void CLogger::WriteMessage(const char* message, bool doRender = false)
 	}
 }
 
+int CLogger::GetNumberOfErrors()
+{
+	std::lock_guard<std::mutex> lock(m_Mutex);
+	return m_NumberOfErrors;
+}
+
 void CLogger::WriteError(const char* message)
 {
 	std::string cmessage = ToHTML(message);

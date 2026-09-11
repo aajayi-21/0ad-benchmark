@@ -84,6 +84,9 @@ COMPONENT(AIManager)
 INTERFACE(Attack)
 COMPONENT(AttackScripted)
 
+INTERFACE(BenchmarkInterface)
+COMPONENT(BenchmarkInterfaceScripted)
+
 INTERFACE(CinemaManager)
 COMPONENT(CinemaManager)
 

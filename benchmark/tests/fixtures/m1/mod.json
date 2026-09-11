@@ -1,0 +1,7 @@
+{
+	"name": "m1_fixture",
+	"version": "0.1.0",
+	"label": "M1 integration fixtures",
+	"description": "Only loaded by the benchmark integration checks.",
+	"dependencies": ["agent_benchmark=0.1.0"]
+}

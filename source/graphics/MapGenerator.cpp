@@ -424,6 +424,10 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
 	JS::RootedValue map{rq.cx, Script::Function::RunGenerator(rq, ns, GENERATOR_NAME, settingsVal,
 		[&](const JS::HandleValue value)
 		{
+			// A suspended loader can cancel this Future while the generator is yielding.
+			// Do not depend on an unrelated SpiderMonkey interrupt to observe that request.
+			if (stopToken.IsStopRequested())
+				throw std::runtime_error{"Map generation cancelled"};
 			// When the task is started, `progress` is only mutated by this thread.
 			const int currentProgress{progress.load()};
 			int tempProgress;

@@ -15,17 +15,25 @@
  * along with 0 A.D.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef INCLUDED_JSI_MOD
-#define INCLUDED_JSI_MOD
+#ifndef INCLUDED_ICMPBENCHMARKINTERFACE
+#define INCLUDED_ICMPBENCHMARKINTERFACE
 
-namespace JS { class Value; }
-namespace Script { class Request; class Interface; }
+#include "simulation2/system/Component.h"
+#include "simulation2/system/Interface.h"
 
-namespace JSI_Mod
+#include <js/TypeDecls.h>
+#include <string>
+#include <vector>
+
+/** Main-thread bridge to the optional agent_benchmark simulation mod. */
+class ICmpBenchmarkInterface : public IComponent
 {
-	// Shared engine/mod metadata for game attributes and replay compatibility.
-	JS::Value GetEngineInfo(const Script::Interface& scriptInterface);
-	void RegisterScriptFunctions(const Script::Request& rq);
-}
+public:
+	virtual void GetSnapshot(JS::MutableHandleValue ret, const std::vector<int>& seats) = 0;
+	virtual void GetCatalog(JS::MutableHandleValue ret, int seat,
+		const std::vector<std::string>& names, const std::vector<std::string>& technologies) = 0;
 
-#endif // INCLUDED_JSI_MOD
+	DECLARE_INTERFACE_TYPE(BenchmarkInterface)
+};
+
+#endif // INCLUDED_ICMPBENCHMARKINTERFACE
