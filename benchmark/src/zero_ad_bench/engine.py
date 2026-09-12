@@ -56,9 +56,11 @@ class EngineProcess:
         process_deadline_s=1800,
         request_timeout_s=45,
     ):
-        self.directory = Path(directory)
+        # The engine's XDG directories must be absolute: the child resolves relative paths
+        # against its own working directory, not the runner's.
+        self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.engine = Path(engine)
+        self.engine = Path(engine).resolve()
         self.request_timeout_s = request_timeout_s
         self.token = secrets.token_hex(24)
         self.opener = request.build_opener(request.ProxyHandler({}))
@@ -74,7 +76,9 @@ class EngineProcess:
         for key in ("DATA", "CONFIG", "CACHE", "STATE"):
             self.env[f"XDG_{key}_HOME"] = str(self.directory / key.lower())
         self.env["ZERO_AD_BENCHMARK_TOKEN"] = self.token
-        self.mod_sources = {name: Path(path) for name, path in (mod_sources or {}).items()}
+        self.mod_sources = {
+            name: Path(path).resolve() for name, path in (mod_sources or {}).items()
+        }
         for name, source in self.mod_sources.items():
             shutil.copytree(source, self.directory / "data/0ad/mods" / name)
         self.mods = list(mods)

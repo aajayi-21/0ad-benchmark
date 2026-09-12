@@ -1,0 +1,27 @@
+{
+	"schema_version": 1,
+	"id": "openrouter_pilot_v1",
+	"description": "Pilot scaffold through OpenRouter; the model id is an OpenRouter catalog id and usage cost comes from OpenRouter's response.",
+	"provider": {
+		"kind": "openrouter",
+		"model": "anthropic/claude-opus-5",
+		"api_key_env": "OPENROUTER_API_KEY",
+		"base_url": "https://openrouter.ai/api/v1",
+		"reasoning_effort": "high",
+		"app_title": "0ad-agent-benchmark",
+		"app_url": null,
+		"provider_routing": null,
+		"timeout_s": 180
+	},
+	"sampling": {"temperature": null},
+	"budgets": {
+		"model_requests_per_decision": 4,
+		"output_tokens_per_decision": 8000,
+		"episode_tokens": 400000,
+		"episode_cost_usd": 5.0
+	},
+	"pricing_usd_per_million": {"input": 5.0, "output": 25.0, "cache_read": null, "cache_write": null},
+	"notes": {"max_chars": 4000},
+	"tool_result_max_chars": 24000,
+	"retry": {"max_attempts": 3, "backoff_s": 2.0}
+}

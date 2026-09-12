@@ -63,12 +63,32 @@ def build_result(directory, override=None):
     seats = [str(seat) for seat in manifest.get("seats", [])]
     administrative = dict.fromkeys(seats)
     for decision in streams["decisions"]:
-        if decision["outcome"] == "forfeit":
-            administrative[str(decision["seat"])] = {"kind": "forfeit", "turn": decision["turn"]}
+        if decision["outcome"] in ("forfeit", "agent_stop"):
+            kind = (
+                decision["outcome"]
+                if decision["outcome"] == "forfeit"
+                else (decision.get("metadata") or {}).get("stop_kind")
+                or decision.get("administrative")
+            )
+            administrative[str(decision["seat"])] = {
+                "kind": kind,
+                "turn": decision["turn"],
+                "reason": decision.get("error"),
+            }
     invalid = [
         {"reason": "ledger_overflow", "decision_id": e["decision_id"], "dropped": e["dropped"]}
         for e in streams["events"]
         if e.get("type") == "ledger_overflow"
+    ]
+    invalid += [
+        {
+            "reason": "provider_failure",
+            "decision_id": d["decision_id"],
+            "seat": d["seat"],
+            "detail": d.get("error"),
+        }
+        for d in streams["decisions"]
+        if d["outcome"] == "provider_failure"
     ]
     if status in ("completed", "invalid"):
         invalid += [
@@ -121,7 +141,70 @@ def build_result(directory, override=None):
         },
         "stream_truncation": episode["truncated"],
         "record_counts": {name: len(records) for name, records in streams.items()},
+        "model_usage": model_usage(streams["model-calls"], streams["decisions"]),
     }
+
+
+def model_usage(calls, decisions):
+    """Aggregate provider accounting; counts a provider did not report stay unavailable."""
+    model_calls = [c for c in calls if c.get("kind") == "model"]
+    if not model_calls:
+        return None
+    usage = {
+        "attempts": len(model_calls),
+        "responses": 0,
+        "errors": 0,
+        "retries": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "cost_unavailable": False,
+        "latency_s_total": 0.0,
+        "usage_unavailable_responses": 0,
+        "models": {},
+        "providers": {},
+        "stop_reasons": {},
+        "error_kinds": {},
+    }
+    seen = set()
+    for call in model_calls:
+        key = (call.get("seat"), call.get("decision_id"), call.get("request_index"))
+        if key in seen:
+            usage["retries"] += 1
+        seen.add(key)
+        usage["latency_s_total"] += call.get("latency_s") or 0
+        if call.get("error"):
+            usage["errors"] += 1
+            kind = call["error"].get("kind", "unknown")
+            usage["error_kinds"][kind] = usage["error_kinds"].get(kind, 0) + 1
+            continue
+        usage["responses"] += 1
+        response = call.get("response") or {}
+        stop = response.get("stop_reason", "unknown")
+        usage["stop_reasons"][stop] = usage["stop_reasons"].get(stop, 0) + 1
+        model = response.get("model") or call.get("model")
+        usage["models"][model] = usage["models"].get(model, 0) + 1
+        usage["providers"][call.get("provider")] = (
+            usage["providers"].get(call.get("provider"), 0) + 1
+        )
+        counts = call.get("usage") or {}
+        if counts.get("input_tokens") is None or counts.get("output_tokens") is None:
+            usage["usage_unavailable_responses"] += 1
+        for field in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
+            if counts.get(field) is not None:
+                usage[field] += counts[field]
+        if call.get("cost_usd") is None:
+            usage["cost_unavailable"] = True
+        else:
+            usage["cost_usd"] = round(usage["cost_usd"] + call["cost_usd"], 8)
+    usage["latency_s_total"] = round(usage["latency_s_total"], 6)
+    reasons = {}
+    for decision in decisions:
+        reason = (decision.get("metadata") or {}).get("reason") or decision["outcome"]
+        reasons[reason] = reasons.get(reason, 0) + 1
+    usage["decision_reasons"] = reasons
+    return usage
 
 
 def _table(headers, rows):
@@ -413,17 +496,59 @@ def build_report(directory, result=None):
         f"- Decision outcomes: {json.dumps(result['decision_outcomes'], sort_keys=True)}",
     ]
     tools = [c for c in streams["model-calls"] if c.get("kind") == "tool"]
-    lines += [
-        "",
-        "## Model usage",
-        "",
-        (
-            "No model adapter is attached in M4: provider calls, tokens, latency, retries, and "
-            "cost are unavailable, not zero."
+    usage = result.get("model_usage")
+    lines += ["", "## Model usage", ""]
+    if usage:
+        cost = "unavailable" if usage["cost_unavailable"] else f"{usage['cost_usd']:.4f} USD"
+        lines += [
+            (
+                f"- Provider attempts {usage['attempts']}, responses {usage['responses']}, "
+                f"errors {usage['errors']}, retries {usage['retries']}; models "
+                f"{json.dumps(usage['models'], sort_keys=True)}"
+            ),
+            (
+                f"- Tokens: input {usage['input_tokens']}, output {usage['output_tokens']}, "
+                f"cache read {usage['cache_read_input_tokens']}; responses without provider "
+                f"counts: {usage['usage_unavailable_responses']}; cost {cost}; total latency "
+                f"{usage['latency_s_total']:.2f} s"
+            ),
+            (
+                f"- Stop reasons {json.dumps(usage['stop_reasons'], sort_keys=True)}; error "
+                f"kinds {json.dumps(usage['error_kinds'], sort_keys=True)}; decision reasons "
+                f"{json.dumps(usage['decision_reasons'], sort_keys=True)}"
+            ),
+        ]
+    else:
+        lines.append(
+            "No model adapter was attached: provider calls, tokens, latency, retries, and cost "
+            "are unavailable, not zero."
+        )
+    lines.append(
+        f"- Tool calls through the player gateway: {len(tools)} "
+        f"({json.dumps(dict(Counter(c['operation'] for c in tools)), sort_keys=True)})"
+    )
+    lines += ["", "## Usability versus strategy", ""]
+    usability = {
+        "decisions_without_submission": sum(
+            1
+            for d in decisions
+            if d["outcome"] != "submitted"
+            or (d.get("metadata") or {}).get("reason") not in (None, "submitted")
         ),
+        "tool_errors": sum(
+            1 for c in tools if isinstance(c.get("response"), dict) and "error" in c["response"]
+        ),
+        "non_applied_actions": sum(reliability["reasons"].values()),
+        "provider_failures": sum(1 for d in decisions if d["outcome"] == "provider_failure"),
+    }
+    lines += [
+        "Environment usability failures (interface, tools, budgets): "
+        + json.dumps(usability, sort_keys=True),
+        "",
         (
-            f"- Tool calls through the player gateway: {len(tools)} "
-            f"({json.dumps(dict(Counter(c['operation'] for c in tools)), sort_keys=True)})"
+            f"Strategy outcome (objective and game state): result {result['result']}, "
+            f"objective success {objective.get('success')}, achieved turn "
+            f"{objective.get('achieved_turn')}."
         ),
     ]
     lines += ["", "## Trace-backed observations", ""]
