@@ -1,0 +1,17 @@
+{
+	"schema_version": 1,
+	"id": "mock_pilot_v1",
+	"description": "Deterministic mock provider for scaffold tests; no network, synthetic token counts.",
+	"provider": {"kind": "mock", "model": "mock-model"},
+	"sampling": {"temperature": 0.0},
+	"budgets": {
+		"model_requests_per_decision": 4,
+		"output_tokens_per_decision": 8000,
+		"episode_tokens": 2000000,
+		"episode_cost_usd": null
+	},
+	"pricing_usd_per_million": {"input": 1.0, "output": 5.0, "cache_read": 0.1, "cache_write": 1.25},
+	"notes": {"max_chars": 4000},
+	"tool_result_max_chars": 24000,
+	"retry": {"max_attempts": 3, "backoff_s": 0.05}
+}

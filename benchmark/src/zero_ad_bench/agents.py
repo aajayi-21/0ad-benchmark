@@ -4,6 +4,34 @@ import math
 import time
 
 
+class DecisionResult:
+    """Actions plus controller metadata (plan, notes, usage) recorded with the decision."""
+
+    def __init__(self, actions, metadata=None):
+        self.actions = actions
+        self.metadata = metadata or {}
+
+
+class AgentStop(Exception):  # noqa: N818
+    """The controller ends its participation (for example a budget stop).
+
+    The runner records it administratively and submits a resign action.
+    """
+
+    def __init__(self, kind, reason):
+        super().__init__(f"{kind}: {reason}")
+        self.kind = kind
+        self.reason = reason
+
+
+class ProviderFailure(Exception):  # noqa: N818
+    """A persistent provider outage: an infrastructure failure, not a strategic no-op."""
+
+    def __init__(self, detail):
+        super().__init__(str(detail))
+        self.detail = detail
+
+
 class NoOpController:
     name = "noop"
 

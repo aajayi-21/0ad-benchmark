@@ -1,0 +1,22 @@
+{
+	"schema_version": 1,
+	"id": "codex_local_v1",
+	"description": "Local Codex CLI (codex exec) as a tool-less completion backend; untested here because the CLI is not installed.",
+	"provider": {
+		"kind": "command",
+		"preset": "codex",
+		"model": "set-the-codex-model-id",
+		"timeout_s": 600
+	},
+	"sampling": {"temperature": null},
+	"budgets": {
+		"model_requests_per_decision": 4,
+		"output_tokens_per_decision": 8000,
+		"episode_tokens": 400000,
+		"episode_cost_usd": null
+	},
+	"pricing_usd_per_million": {"input": null, "output": null, "cache_read": null, "cache_write": null},
+	"notes": {"max_chars": 4000},
+	"tool_result_max_chars": 24000,
+	"retry": {"max_attempts": 2, "backoff_s": 5.0}
+}

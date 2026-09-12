@@ -1,5 +1,6 @@
 """Episode lifecycle: reset, synchronized decisions, exact advances, artifacts, finalize."""
 
+import json
 import secrets
 import shutil
 import threading
@@ -10,6 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from zero_ad_bench import PROTOCOL_VERSION, evaluation, report
+from zero_ad_bench.agents import AgentStop, DecisionResult, ProviderFailure
 from zero_ad_bench.engine import EngineError
 from zero_ad_bench.scenario import INFORMATION_TRACKS, PHASE_ORDER
 from zero_ad_bench.telemetry import EpisodeArtifacts
@@ -31,6 +33,8 @@ class RunOptions:
     max_consecutive_failures: int = 3
     experiment_id: str = "local"
     label: str | None = None
+    # A shortened horizon for smoke runs; scored runs must leave this unset.
+    turn_limit_override: int | None = None
 
 
 def phase_of(researched):
@@ -50,26 +54,39 @@ class PlayerGateway:
         self.turn = turn
         self.reads = 0
         self.read_budget = episode.scenario.limits["reads_per_decision"]
+        self.decision_turns = episode.scenario.decision_turns
+        self.deadline_s = episode.options.decision_deadline_s
         self.view = episode.views[seat]
 
     def observation(self):
         return self.view
 
-    def _tool(self, operation, body):
-        if self.reads >= self.read_budget:
-            raise BudgetExceeded(f"Read budget of {self.read_budget} exhausted")
-        self.reads += 1
-        started = time.monotonic()
-        status, envelope = self.episode.engine.call(operation, body)
-        response = envelope.get("data") if envelope.get("ok") else {"error": envelope.get("error")}
+    def record(self, kind, payload):
+        """Append a controller record (model call, tool call) to model-calls.jsonl."""
         self.episode.artifacts.append(
             "model-calls",
             {
-                "kind": "tool",
-                "operation": operation,
+                "kind": kind,
                 "seat": self.seat,
                 "decision_id": self.decision_id,
                 "turn": self.turn,
+                **payload,
+            },
+        )
+
+    def _tool(self, operation, body, charged=True):
+        if charged and self.reads >= self.read_budget:
+            raise BudgetExceeded(f"Read budget of {self.read_budget} exhausted")
+        if charged:
+            self.reads += 1
+        started = time.monotonic()
+        status, envelope = self.episode.engine.call(operation, body)
+        response = envelope.get("data") if envelope.get("ok") else {"error": envelope.get("error")}
+        self.record(
+            "tool",
+            {
+                "operation": operation,
+                "charged": charged,
                 "request": {k: v for k, v in body.items() if k != "episode_id"},
                 "http_status": status,
                 "response": response,
@@ -78,16 +95,28 @@ class PlayerGateway:
         )
         return response
 
+    def _inspect_body(self, kind, fields):
+        return {
+            "episode_id": self.episode.episode_id,
+            "seat": self.seat,
+            "observation_id": self.view["observation_id"],
+            "kind": kind,
+            **fields,
+        }
+
     def inspect(self, kind, **fields):
+        return self._tool("inspect", self._inspect_body(kind, fields))
+
+    def briefing(self, max_chars=32768, limit=64):
+        """Return the initial text observation; it is supplied automatically, not charged.
+
+        The largest page the engine allows is requested so the model rarely needs a second
+        request to see the whole briefing; any remaining rows are stated in the header.
+        """
         return self._tool(
             "inspect",
-            {
-                "episode_id": self.episode.episode_id,
-                "seat": self.seat,
-                "observation_id": self.view["observation_id"],
-                "kind": kind,
-                **fields,
-            },
+            self._inspect_body("briefing", {"max_chars": max_chars, "limit": limit}),
+            charged=False,
         )
 
     def catalog(self, templates=(), technologies=()):
@@ -337,15 +366,24 @@ class Episode:
         thread.join(self.options.decision_deadline_s)
         elapsed = round(time.monotonic() - started, 6)
         if thread.is_alive():
-            return [], "timeout", elapsed, None
+            return [], "timeout", elapsed, None, {}
         if "error" in holder:
-            if isinstance(holder["error"], EngineError):
-                raise holder["error"]
-            return [], "controller_error", elapsed, repr(holder["error"])[:500]
+            failure = holder["error"]
+            if isinstance(failure, EngineError):
+                raise failure
+            if isinstance(failure, AgentStop):
+                return [], "agent_stop", elapsed, failure.reason, {"stop_kind": failure.kind}
+            if isinstance(failure, ProviderFailure):
+                return [], "provider_failure", elapsed, json.dumps(failure.detail)[:500], {}
+            return [], "controller_error", elapsed, repr(failure)[:500], {}
         actions = holder.get("actions")
+        metadata = {}
+        if isinstance(actions, DecisionResult):
+            metadata = actions.metadata
+            actions = actions.actions
         if not isinstance(actions, list) or not all(isinstance(a, dict) for a in actions):
-            return [], "malformed", elapsed, None
-        return actions, "submitted", elapsed, None
+            return [], "malformed", elapsed, None, metadata
+        return actions, "submitted", elapsed, None, metadata
 
     def _decide_and_advance(self):
         decision_id = self.data["next_decision_id"]
@@ -353,10 +391,18 @@ class Episode:
         batches = []
         for seat in self.seats:
             gateway = PlayerGateway(self, seat, decision_id, turn)
-            actions, outcome, elapsed, error_text = self._collect(self.controllers[seat], gateway)
-            self.failures[seat] = 0 if outcome == "submitted" else self.failures[seat] + 1
+            actions, outcome, elapsed, error_text, metadata = self._collect(
+                self.controllers[seat], gateway
+            )
+            # Provider outages are infrastructure: they neither count toward a forfeit nor
+            # reset the streak. Budget stops end participation immediately.
+            if outcome not in ("provider_failure", "agent_stop"):
+                self.failures[seat] = 0 if outcome == "submitted" else self.failures[seat] + 1
             if self.administrative[seat]:
                 actions = []
+            elif outcome == "agent_stop":
+                self.administrative[seat] = metadata.get("stop_kind", "agent_stop")
+                actions = [{"action_id": "agent-stop", "type": "resign"}]
             elif self.failures[seat] >= self.options.max_consecutive_failures:
                 self.administrative[seat] = "forfeit"
                 outcome = "forfeit"
@@ -377,6 +423,7 @@ class Episode:
                     "read_budget": gateway.read_budget,
                     "consecutive_failures": self.failures[seat],
                     "administrative": self.administrative[seat],
+                    "metadata": metadata,
                 },
             )
             batches.append({"seat": seat, "actions": actions})

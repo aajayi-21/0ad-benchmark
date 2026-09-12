@@ -1,0 +1,24 @@
+{
+	"schema_version": 1,
+	"id": "openai_compatible_pilot_v1",
+	"description": "Pilot scaffold for an OpenAI-compatible chat-completions endpoint (function calling).",
+	"provider": {
+		"kind": "openai_compatible",
+		"model": "set-the-model-id",
+		"base_url": "https://api.openai.com/v1",
+		"api_key_env": "OPENAI_API_KEY",
+		"reasoning_effort": null,
+		"timeout_s": 120
+	},
+	"sampling": {"temperature": 0.0},
+	"budgets": {
+		"model_requests_per_decision": 4,
+		"output_tokens_per_decision": 8000,
+		"episode_tokens": 400000,
+		"episode_cost_usd": 5.0
+	},
+	"pricing_usd_per_million": {"input": null, "output": null, "cache_read": null, "cache_write": null},
+	"notes": {"max_chars": 4000},
+	"tool_result_max_chars": 24000,
+	"retry": {"max_attempts": 3, "backoff_s": 2.0}
+}

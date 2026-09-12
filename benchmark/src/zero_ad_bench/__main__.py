@@ -10,6 +10,8 @@ from zero_ad_bench import PACKAGE_VERSION, report
 from zero_ad_bench.agents import make_controller
 from zero_ad_bench.engine import DEFAULT_ENGINE, EngineProcess
 from zero_ad_bench.environment import Episode, RunOptions
+from zero_ad_bench.model_agent import ModelController
+from zero_ad_bench.providers import COMMAND_PRESETS, make_provider
 from zero_ad_bench.scenario import Scenario
 
 
@@ -25,10 +27,25 @@ def _pairs(values):
 
 def run(args):
     scenario = Scenario.load(args.scenario)
+    if args.turn_limit is not None:
+        if not 1 <= args.turn_limit <= 12000:
+            raise SystemExit("--turn-limit must be between 1 and 12000")
+        scenario.turn_limit = args.turn_limit
     mod_sources = {name: Path(path) for name, path in _pairs(args.mod_source).items()}
     seats = scenario.external_seats()
     specs = _pairs(args.controller_seat)
-    controllers = {seat: make_controller(specs.get(str(seat), args.controller)) for seat in seats}
+    experiment = (
+        json.loads(Path(args.experiment_config).read_text()) if args.experiment_config else None
+    )
+
+    def build(spec):
+        if spec == "model":
+            if experiment is None:
+                raise SystemExit("--experiment-config is required for the model controller")
+            return ModelController(make_provider(experiment["provider"]), experiment)
+        return make_controller(spec)
+
+    controllers = {seat: build(specs.get(str(seat), args.controller)) for seat in seats}
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     options = RunOptions(
@@ -36,8 +53,9 @@ def run(args):
         telemetry=not args.no_telemetry,
         save_replay=not args.no_replay,
         max_consecutive_failures=args.max_failures,
-        experiment_id=args.experiment,
+        experiment_id=experiment["id"] if experiment else args.experiment,
         label=args.label,
+        turn_limit_override=args.turn_limit,
     )
     engine = EngineProcess(
         output / f"engine-{scenario.id}-{Path(args.output).name}-{id(options):x}",
@@ -97,6 +115,61 @@ def verify(args):
     return 0 if outcome.get("ok") else 1
 
 
+def check(args):
+    """Validate a provider configuration without spending: catalog, executable, key presence."""
+    import os  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    from urllib import request  # noqa: PLC0415
+
+    experiment = json.loads(Path(args.experiment_config).read_text())
+    provider = experiment["provider"]
+    outcome = {
+        "experiment": experiment["id"],
+        "kind": provider["kind"],
+        "model": provider.get("model"),
+    }
+    defaults = {"anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+    if provider["kind"] in ("anthropic", "openai_compatible", "openrouter"):
+        env = provider.get("api_key_env", defaults.get(provider["kind"], "OPENAI_API_KEY"))
+        outcome["api_key_env"] = env
+        outcome["api_key_present"] = bool(os.environ.get(env))
+    if provider["kind"] == "openrouter":
+        base = (provider.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
+        with request.urlopen(f"{base}/models", timeout=30) as response:  # noqa: S310
+            catalog = json.loads(response.read().decode())["data"]
+        entry = next((m for m in catalog if m["id"] == provider["model"]), None)
+        outcome["catalog_models"] = len(catalog)
+        outcome["model_found"] = entry is not None
+        if entry is not None:
+            pricing = entry.get("pricing", {})
+            parameters = entry.get("supported_parameters", [])
+            outcome.update(
+                {
+                    "context_length": entry.get("context_length"),
+                    "supports_tools": "tools" in parameters,
+                    "supports_reasoning": "reasoning" in parameters,
+                    "catalog_usd_per_million": {
+                        "input": float(pricing.get("prompt", 0)) * 1e6,
+                        "output": float(pricing.get("completion", 0)) * 1e6,
+                    },
+                    "configured_usd_per_million": experiment.get("pricing_usd_per_million"),
+                }
+            )
+    if provider["kind"] == "command":
+        preset = COMMAND_PRESETS.get(provider.get("preset", ""), {})
+        argv = provider.get("argv") or preset.get("argv", [])
+        executable = shutil.which(argv[0]) if argv else None
+        outcome["executable"] = executable
+        if executable:
+            version = subprocess.run(
+                [executable, "--version"], capture_output=True, text=True, timeout=30, check=False
+            )
+            outcome["version"] = (version.stdout or version.stderr).strip()[:200]
+    print(json.dumps(outcome, indent=2, sort_keys=True))
+    return 0 if outcome.get("model_found", True) and outcome.get("executable", True) else 1
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="zero_ad_bench")
     parser.add_argument("--version", action="version", version=PACKAGE_VERSION)
@@ -104,7 +177,15 @@ def main(argv=None):
     runner = commands.add_parser("run", help="run one episode and write its artifacts")
     runner.add_argument("--scenario", required=True)
     runner.add_argument("--output", required=True)
-    runner.add_argument("--controller", default="noop", help="noop, raid_recovery, sleep:SECONDS")
+    runner.add_argument(
+        "--controller", default="noop", help="noop, raid_recovery, sleep:SECONDS, or model"
+    )
+    runner.add_argument("--experiment-config", help="experiment JSON for the model controller")
+    runner.add_argument(
+        "--turn-limit",
+        type=int,
+        help="override the scenario horizon for smoke runs; recorded as an override",
+    )
     runner.add_argument("--controller-seat", action="append", metavar="SEAT=SPEC")
     runner.add_argument("--mod-source", action="append", metavar="NAME=PATH")
     runner.add_argument("--engine", default=str(DEFAULT_ENGINE))
@@ -128,6 +209,9 @@ def main(argv=None):
     verifier.add_argument("--engine", default=str(DEFAULT_ENGINE))
     verifier.add_argument("--mod-source", action="append", metavar="NAME=PATH")
     verifier.set_defaults(handler=verify)
+    checker = commands.add_parser("check", help="validate a provider config without spending")
+    checker.add_argument("--experiment-config", required=True)
+    checker.set_defaults(handler=check)
     args = parser.parse_args(argv)
     return args.handler(args)
 
