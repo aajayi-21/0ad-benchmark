@@ -1,0 +1,61 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark"
+	],
+	"settings": {
+		"Size": 128,
+		"Biome": "generic/temperate",
+		"PlayerPlacement": "circle",
+		"StartingResources": 300,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [
+		"conquest"
+	],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "full_game_conquest_v1",
+	"description": "Full game: conquest victory against Petra (difficulty 3, balanced) on Mainland before turn 12000.",
+	"map": {
+		"type": "random",
+		"path": "maps/random/mainland"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "petra",
+			"civilization": "athen",
+			"difficulty": 3,
+			"behavior": "balanced"
+		}
+	},
+	"schedule": {
+		"decision_turns": 50,
+		"turn_limit": 12000
+	},
+	"objective": {
+		"evaluator": "conquest_v1",
+		"player": 1,
+		"params": {},
+		"success": "Player 1 wins by conquest before turn 12000.",
+		"public": "Win by conquest: destroy or capture all enemy conquest-critical entities before turn 12000. Reaching the turn limit is a draw.",
+		"stop_on_success": true
+	},
+	"trigger_scripts": [],
+	"assets": [],
+	"baseline": "economy",
+	"family": "full_game"
+}

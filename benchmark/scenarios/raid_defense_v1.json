@@ -1,0 +1,65 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark",
+		"agent_benchmark_suite"
+	],
+	"settings": {
+		"Size": 128,
+		"StartingResources": 300,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "raid_defense_v1",
+	"description": "Keep the civic centre through two scripted ram raids (turns 250 and 900) until turn 1800 (6 simulated minutes); the army starts 40 tiles away.",
+	"map": {
+		"type": "random",
+		"path": "maps/random/suite_raid"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "passive",
+			"civilization": "rome"
+		}
+	},
+	"schedule": {
+		"decision_turns": 25,
+		"turn_limit": 1800
+	},
+	"objective": {
+		"evaluator": "preserve_entity_v1",
+		"player": 1,
+		"params": {
+			"template_suffix": "civil_centre",
+			"until_turn": 1800
+		},
+		"success": "Player 1 owns a civic centre at every decision boundary through turn 1800.",
+		"public": "Enemy siege rams with sword escorts will attack your civic centre in two waves. Your spearmen and cavalry are drilling away from the centre and will not react on their own. Keep your civic centre standing and yours until turn 1800. Rams resist arrows and spears; cavalry and focused attacks kill them.",
+		"stop_on_success": true
+	},
+	"trigger_scripts": [
+		"scripts/suite_raid.js"
+	],
+	"assets": [
+		"maps/random/suite_raid.js",
+		"maps/random/suite/common.js",
+		"maps/scripts/suite_raid.js"
+	],
+	"baseline": "defense",
+	"family": "defense"
+}

@@ -1,0 +1,62 @@
+{
+	"schema_version": 1,
+	"id": "suite_v1",
+	"frozen": "2026-09-12",
+	"description": "First frozen suite: five goal scenarios plus a full-game track.",
+	"scenarios": [
+		"economy_phase_town_v1",
+		"raid_defense_v1",
+		"recovery_v1",
+		"expansion_v1",
+		"scouting_response_v1",
+		"full_game_conquest_v1"
+	],
+	"seed_splits": {
+		"development": [
+			101,
+			102,
+			103
+		],
+		"public_evaluation": [
+			201,
+			202,
+			203,
+			204,
+			205
+		],
+		"private_evaluation": {
+			"count": 5,
+			"sha256": "b2d49425e5d8a53b2ade53b249e623bb21678e1664512276f0c3433f937e81a9",
+			"location": "operator-held, outside the repository"
+		}
+	},
+	"ai_seed_offset": 1000,
+	"trials": {
+		"pilot_per_seed": 1,
+		"first_report_seed_pairs": 30
+	},
+	"controllers": {
+		"noop": "no-op baseline",
+		"random": "legal-random baseline (seeded)",
+		"scripted": "per-scenario scripted baseline named by each manifest's `baseline`",
+		"model": "model controller with an experiment configuration"
+	},
+	"analysis": {
+		"success_rate": "successes / valid completed episodes; 95% percentile bootstrap clustered by seed, 2000 resamples, fixed resampling seed",
+		"time_to_success": "achieved_turn of successful episodes; failures censored at the horizon; medians reported only with the censored count",
+		"full_game": "wins, draws, losses, administrative outcomes; match score (wins + 0.5 draws) / valid matches",
+		"exclusions": "failed, invalid, interrupted, and incomplete episodes are excluded from denominators and listed with reasons",
+		"cost": "provider-reported cost when available, otherwise configured prices; unavailable counts stay unavailable"
+	},
+	"versions": {
+		"protocol": "1.3",
+		"observation_schema": "1.0",
+		"artifact_schema": "1.0",
+		"scaffold": "2",
+		"evaluator": "1",
+		"mods": {
+			"agent_benchmark": "0.4.1",
+			"agent_benchmark_suite": "0.1.0"
+		}
+	}
+}

@@ -1,0 +1,67 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark",
+		"agent_benchmark_suite"
+	],
+	"settings": {
+		"Size": 128,
+		"StartingResources": 500,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "recovery_v1",
+	"description": "Absorb a cavalry raid on the workers and restore at least ten civilians by turn 1800.",
+	"map": {
+		"type": "random",
+		"path": "maps/random/suite_recovery"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "passive",
+			"civilization": "athen"
+		}
+	},
+	"schedule": {
+		"decision_turns": 25,
+		"turn_limit": 1800
+	},
+	"objective": {
+		"evaluator": "entity_count_v1",
+		"player": 1,
+		"params": {
+			"template_suffix": "support_civilian",
+			"min_count": 10,
+			"after_turn": 300,
+			"by_turn": 1800
+		},
+		"success": "Player 1 owns at least ten civilians at a decision boundary after turn 300 and by turn 1800.",
+		"public": "A cavalry raid will hit your workers early. Recover: keep the economy running and have at least ten civilians after turn 300.",
+		"stop_on_success": true
+	},
+	"trigger_scripts": [
+		"scripts/suite_recovery.js"
+	],
+	"assets": [
+		"maps/random/suite_recovery.js",
+		"maps/random/suite/common.js",
+		"maps/scripts/suite_recovery.js"
+	],
+	"baseline": "recovery",
+	"family": "recovery"
+}

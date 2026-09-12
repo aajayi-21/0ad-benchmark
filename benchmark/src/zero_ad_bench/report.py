@@ -651,11 +651,12 @@ def replay_check(directory, engine, mod_sources, work_dir=None):
     """Replay `replay/commands.txt` headlessly and compare every recorded hash."""
     from zero_ad_bench.engine import DEFAULT_ENGINE  # noqa: PLC0415
 
-    directory = Path(directory)
+    # The engine runs from the profile directory, so every path it receives must be absolute.
+    directory = Path(directory).resolve()
     commands = directory / "replay/commands.txt"
     if not commands.is_file():
         return {"ok": False, "error": "no replay commands"}
-    profile = Path(work_dir or directory / "replay-check")
+    profile = Path(work_dir or directory / "replay-check").resolve()
     if profile.exists():
         shutil.rmtree(profile)
     profile.mkdir(parents=True)
@@ -667,7 +668,11 @@ def replay_check(directory, engine, mod_sources, work_dir=None):
     log_path = profile / "replay.log"
     with log_path.open("w") as log:
         completed = subprocess.run(
-            [str(engine or DEFAULT_ENGINE), f"--replay={commands}", "--hashtest-full=true"],
+            [
+                str(Path(engine or DEFAULT_ENGINE).resolve()),
+                f"--replay={commands}",
+                "--hashtest-full=true",
+            ],
             env=env,
             cwd=profile,
             stdout=log,

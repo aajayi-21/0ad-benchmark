@@ -1,0 +1,72 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark",
+		"agent_benchmark_suite"
+	],
+	"settings": {
+		"Size": 128,
+		"StartingResources": 300,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "expansion_v1",
+	"description": "Complete an outpost or civic centre inside the eastern target region and hold it for 300 turns before turn 2400.",
+	"map": {
+		"type": "random",
+		"path": "maps/random/suite_expansion"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "passive",
+			"civilization": "athen"
+		}
+	},
+	"schedule": {
+		"decision_turns": 50,
+		"turn_limit": 2400
+	},
+	"objective": {
+		"evaluator": "structure_in_region_v1",
+		"player": 1,
+		"params": {
+			"template_suffixes": [
+				"outpost",
+				"civil_centre"
+			],
+			"bounds": {
+				"min_x": 352,
+				"min_z": 208,
+				"max_x": 448,
+				"max_z": 304
+			},
+			"hold_turns": 300,
+			"by_turn": 2400
+		},
+		"success": "A completed outpost or civic centre owned by player 1 lies inside the region at every boundary of a 300-turn window ending by turn 2400.",
+		"public": "Expand east: complete an outpost (or a civic centre) whose position lies inside x in [352, 448) and z in [208, 304), and keep it for 300 turns. The region is outside your territory; outposts may be built in neutral territory.",
+		"stop_on_success": true
+	},
+	"trigger_scripts": [],
+	"assets": [
+		"maps/random/suite_expansion.js",
+		"maps/random/suite/common.js"
+	],
+	"baseline": "expansion",
+	"family": "expansion"
+}

@@ -177,8 +177,10 @@ class BenchmarkActions
 		const technology = QueryPlayerIDInterface(seat, IID_TechnologyManager);
 		if (["train", "construct"].includes(command.type))
 		{
+			const manager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
 			if (typeof command.template != "string" || !/^[a-z0-9_/-]{1,200}$/.test(command.template) ||
-				!Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager).TemplateExists(command.template))
+				!manager.TemplateExists(command.template) ||
+				(command.type == "construct" && manager.GetTemplate(command.template).WallSet))
 				this.Reject("unavailable_template");
 			if (!technology.CanProduce(command.template))
 				this.Reject("requirements_unmet");
@@ -197,6 +199,14 @@ class BenchmarkActions
 			this.Reject("unavailable_entity");
 	}
 
+	/** Templates `id` can place with a plain construct command; wall sets need wall placement. */
+	static Buildable(id)
+	{
+		const manager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+		return (Engine.QueryInterface(id, IID_Builder)?.GetEntitiesList() ?? [])
+			.filter(name => !manager.GetTemplate(name)?.WallSet);
+	}
+
 	static CanApply(seat, id, command)
 	{
 		if (!this.Owned(seat, id))
@@ -208,7 +218,7 @@ class BenchmarkActions
 			return false;
 		switch (command.type)
 		{
-		case "construct": return Engine.QueryInterface(id, IID_Builder)?.GetEntitiesList().includes(command.template);
+		case "construct": return this.Buildable(id).includes(command.template);
 		case "attack": return unit.CanAttack(command.target);
 		case "gather": return unit.CanGather(command.target);
 		case "returnresource": return unit.CanReturnResource(command.target, true);

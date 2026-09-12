@@ -24,7 +24,15 @@ FIXTURES = Path(__file__).parent / "fixtures/m1"
 class EngineProcess:
     """Own one bounded engine process and an isolated writable game profile."""
 
-    def __init__(self, directory, port=None, extra_args=(), benchmark_mod=True, fixtures=FIXTURES):
+    def __init__(
+        self,
+        directory,
+        port=None,
+        extra_args=(),
+        benchmark_mod=True,
+        fixtures=FIXTURES,
+        process_timeout_s=120,
+    ):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.token = secrets.token_hex(24)
@@ -56,7 +64,7 @@ class EngineProcess:
         self.log_path = self.directory / "engine.log"
         self.log = self.log_path.open("w", encoding="utf-8")
         self.process = subprocess.Popen(
-            ["timeout", "--kill-after=5s", "120s", *args],
+            ["timeout", "--kill-after=5s", f"{process_timeout_s}s", *args],
             cwd=self.directory,
             env=self.env,
             stdout=self.log,
@@ -352,6 +360,13 @@ class TestM1Interface(unittest.TestCase):
         self.assertEqual(self.engine.process.wait(timeout=10), 0)
 
     def test_petra_reads_preserve_events_and_future_behavior(self):
+        # Two Petra players on Arcadia with three full snapshots per turn is the slowest check
+        # in the suite: advance in 25-turn steps so each request stays inside the bridge's
+        # 30-second deadline on a slow or busy machine, and give the process room to finish.
+        self.engine.close()
+        self.engine = EngineProcess(self.directory / "primary-long", process_timeout_s=600)
+        self.addCleanup(self.engine.close)
+        self.engine.ready()
         base = copy.deepcopy(self.config)
         base["settings"]["TriggerScripts"].append("scripts/m1_command_trace.js")
         for player in base["settings"]["PlayerData"]:
@@ -368,10 +383,10 @@ class TestM1Interface(unittest.TestCase):
             handles = {seat: self.owned_handles(result, seat) for seat in (1, 2)}
             episode = result["episode_id"]
             sequence = []
-            for _ in range(4):
+            for _ in range(16):
                 result = self.ok(
                     "advance",
-                    {"episode_id": episode, "expected_turn": result["turn"], "turns": 100},
+                    {"episode_id": episode, "expected_turn": result["turn"], "turns": 25},
                 )
                 sequence.append(result["data"]["evaluator"])
                 self.assertTrue(result["data"]["players"]["1"]["own_entities"])

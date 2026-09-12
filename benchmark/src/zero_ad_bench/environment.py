@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from zero_ad_bench import PROTOCOL_VERSION, evaluation, report
-from zero_ad_bench.agents import AgentStop, DecisionResult, ProviderFailure
+from zero_ad_bench.agents import AgentStop, DecisionResult, NoOpController, ProviderFailure
 from zero_ad_bench.engine import EngineError
 from zero_ad_bench.scenario import INFORMATION_TRACKS, PHASE_ORDER
 from zero_ad_bench.telemetry import EpisodeArtifacts
@@ -142,6 +142,15 @@ class Episode:
         self.options = options or RunOptions()
         self.mod_sources = {name: str(path) for name, path in (mod_sources or {}).items()}
         self.seats = scenario.external_seats()
+        if not self.seats:
+            # A built-in-AI-only game (for example Petra versus Petra as a simulator sanity
+            # check) still needs one bound seat to observe and advance; it submits nothing.
+            self.seats = [min(scenario.controllers)]
+            controllers = {
+                **controllers,
+                self.seats[0]: controllers.get(self.seats[0], NoOpController()),
+            }
+            self.controllers = controllers
         missing = [seat for seat in self.seats if seat not in controllers]
         if missing:
             raise ValueError(f"No controller bound for external seats {missing}")
@@ -335,6 +344,17 @@ class Episode:
                 },
                 "templates": dict(Counter(e["template"] for e in owned)),
                 "classes": dict(classes),
+                # Structure positions support region evaluators; units stay aggregated.
+                "structures": [
+                    {
+                        "template": e["template"],
+                        "x": e["position"]["x"],
+                        "z": e["position"]["z"],
+                        "foundation": bool(e["foundation"]),
+                    }
+                    for e in owned
+                    if "Structure" in e["classes"] and e["position"]
+                ],
             }
         return {
             "decision_id": decision_id,

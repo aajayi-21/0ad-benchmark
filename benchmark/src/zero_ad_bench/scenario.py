@@ -8,6 +8,8 @@ from pathlib import Path
 
 PHASE_ORDER = ("village", "town", "city")
 INFORMATION_TRACKS = {"partial_v1": "partial", "full_diagnostic_v1": "full"}
+ROOT = Path(__file__).resolve().parents[3]
+VICTORY_CONDITIONS = ROOT / "binaries/data/mods/public/simulation/data/settings/victory_conditions"
 CONTROLLER_KINDS = ("external", "passive", "petra")
 
 
@@ -68,6 +70,31 @@ class Scenario:
         self.trigger_scripts = list(data.get("trigger_scripts", []))
         self.mods = list(data.get("mods", ["agent_benchmark"]))
         self.assets = list(data.get("assets", []))
+        self.baseline = data.get("baseline", "noop")
+        self.family = data.get("family", "")
+
+    def victory_scripts(self):
+        """Trigger scripts the game's own setup adds for the named victory conditions."""
+        scripts = []
+        for name in self.victory_conditions:
+            path = VICTORY_CONDITIONS / f"{name}.json"
+            _require(path.is_file(), f"Unknown victory condition {name!r}")
+            for script in json.loads(path.read_text())["Data"]["Scripts"]:
+                if script not in scripts:
+                    scripts.append(script)
+        return scripts
+
+    def resolved_trigger_scripts(self):
+        """Return custom scripts, then victory scripts, deduplicated as the game setup does."""
+        scripts = list(self.trigger_scripts)
+        scripts += [script for script in self.victory_scripts() if script not in scripts]
+        return scripts
+
+    def with_seeds(self, map_seed, ai_seed):
+        """Return the same scenario with the seed bundle replaced (one trial of a suite)."""
+        copy_ = copy.copy(self)
+        copy_.seeds = {"map": int(map_seed), "ai": int(ai_seed)}
+        return copy_
 
     @classmethod
     def load(cls, path):
@@ -106,7 +133,7 @@ class Scenario:
             "AllyView": False,
             "Ceasefire": 0,
             "VictoryConditions": list(self.victory_conditions),
-            "TriggerScripts": list(self.trigger_scripts),
+            "TriggerScripts": self.resolved_trigger_scripts(),
             **copy.deepcopy(self.settings),
             "PlayerData": players,
         }
@@ -140,6 +167,9 @@ class Scenario:
             "objective": dict(self.objective),
             "victory_conditions": list(self.victory_conditions),
             "trigger_scripts": list(self.trigger_scripts),
+            "victory_scripts": self.victory_scripts(),
             "mods": list(self.mods),
             "assets": list(self.assets),
+            "baseline": self.baseline,
+            "family": self.family,
         }
