@@ -141,7 +141,7 @@ class TestM1Interface(unittest.TestCase):
         status, response = self.engine.call(operation, data, **kwargs)
         self.assertEqual(status, 200, response)
         self.assertTrue(response["ok"], response)
-        self.assertEqual(response["protocol_version"], "1.2")
+        self.assertEqual(response["protocol_version"], "1.3")
         return response
 
     def reset(self, seats=(1,), config=None):

@@ -1,0 +1,25 @@
+{
+	"schema_version": 1,
+	"id": "raid_recovery_v1",
+	"description": "Survive a cavalry raid, then restore at least nine civilians before turn 400.",
+	"map": {"type": "random", "path": "maps/random/m4_raid"},
+	"settings": {"Size": 128, "StartingResources": 2000, "PopulationCap": 300},
+	"seed_bundle": {"map": 7, "ai": 11},
+	"controllers": {
+		"1": {"kind": "external", "civilization": "athen"},
+		"2": {"kind": "passive", "civilization": "athen"}
+	},
+	"information": "partial_v1",
+	"schedule": {"decision_turns": 25, "turn_limit": 500},
+	"objective": {
+		"evaluator": "entity_count_v1",
+		"player": 1,
+		"params": {"template_suffix": "support_civilian", "min_count": 9, "after_turn": 100, "by_turn": 400},
+		"success": "Player 1 owns at least nine civilians at a decision boundary after turn 100 and by turn 400.",
+		"public": "A raid is coming. Recover: keep the economy running and restore at least nine civilians.",
+		"stop_on_success": false
+	},
+	"trigger_scripts": ["scripts/m4_raid.js"],
+	"mods": ["agent_benchmark", "m4_fixture"],
+	"assets": ["maps/random/m4_raid.js", "maps/scripts/m4_raid.js"]
+}

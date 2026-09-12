@@ -205,7 +205,7 @@ struct BenchmarkInterface::Impl
 		// IDs and error strings passed here contain no JSON metacharacters.
 		std::lock_guard lock(mutex);
 		return {status, fmt::format(
-			R"({{"protocol_version":"1.2","episode_id":"{}","request_id":"{}","turn":{},"sim_time_ms":{},"state":"{}","ok":{},"data":{},"error":{}}})",
+			R"({{"protocol_version":"1.3","episode_id":"{}","request_id":"{}","turn":{},"sim_time_ms":{},"state":"{}","ok":{},"data":{},"error":{}}})",
 			includeEpisode ? episode : "", id, includeEpisode ? turn : 0, includeEpisode ? timeMs : 0,
 			includeEpisode ? state : "unavailable", status < 400 ? "true" : "false", data,
 			code.empty() ? "null" : fmt::format(R"({{"code":"{}","message":"{}"}})", code, message))};
@@ -239,6 +239,7 @@ struct BenchmarkInterface::Impl
 			Script::SetProperty(rq, info, "capabilities", std::vector<std::string>{
 				"reset", "observe", "inspect", "catalog", "advance_wait", "advance_actions", "finalize", "shutdown"});
 			Script::SetProperty(rq, info, "player_coverage", std::string("turn_memory_m3"));
+			Script::SetProperty(rq, info, "evaluator_coverage", std::string("event_ledger_m4"));
 			healthData = Script::StringifyJSON(rq, &info, false);
 		}
 
@@ -387,7 +388,13 @@ struct BenchmarkInterface::Impl
 
 	void Reset(const Script::Request& rq, JS::HandleValue body, const Job& job)
 	{
-		Keys(rq, body, {"attributes", "seats", "save_replay", "turn_limit", "information_mode", "objective"});
+		Keys(rq, body, {"attributes", "seats", "save_replay", "turn_limit", "information_mode", "objective", "telemetry"});
+		JS::RootedValue requestedTelemetry(rq.cx);
+		Script::GetProperty(rq, body, "telemetry", &requestedTelemetry);
+		if (!requestedTelemetry.isUndefined() && !requestedTelemetry.isBoolean())
+			throw RequestError(400, "invalid_request", "telemetry must be a boolean");
+		// Disabling the ledger exists only to compare gameplay projections with telemetry on and off.
+		const bool telemetry = requestedTelemetry.isUndefined() || requestedTelemetry.toBoolean();
 		JS::RootedValue requestedMode(rq.cx);
 		Script::GetProperty(rq, body, "information_mode", &requestedMode);
 		const std::string informationMode = requestedMode.isUndefined() ? "partial" : StringField(rq, body, "information_mode");
@@ -492,9 +499,10 @@ struct BenchmarkInterface::Impl
 		if (type == "random")
 			Script::SetProperty(rq, attributes, "script", map.substr(std::string("maps/random/").size()) + ".js");
 		JS::RootedValue benchmarkConfig(rq.cx);
-		Script::ParseJSON(rq, fmt::format(R"({{"protocol_version":"1.2","observation_schema":"1.0","turn_limit":{},"actions_per_seat":20,"group_size":64,"train_batch":5,"map_cell_size":16}})", newLimit), &benchmarkConfig);
+		Script::ParseJSON(rq, fmt::format(R"({{"protocol_version":"1.3","observation_schema":"1.0","turn_limit":{},"actions_per_seat":20,"group_size":64,"train_batch":5,"map_cell_size":16}})", newLimit), &benchmarkConfig);
 		Script::SetProperty(rq, benchmarkConfig, "information_mode", informationMode);
 		Script::SetProperty(rq, benchmarkConfig, "objective", objective);
+		Script::SetProperty(rq, benchmarkConfig, "telemetry", telemetry);
 		Script::SetProperty(rq, benchmarkConfig, "seats", std::vector<int>(uniqueSeats.begin(), uniqueSeats.end()));
 		Script::SetProperty(rq, attributes, "benchmark", benchmarkConfig);
 		const std::string config = Script::StringifyJSON(rq, &attributes, false);

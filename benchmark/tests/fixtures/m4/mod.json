@@ -1,0 +1,7 @@
+{
+	"name": "m4_fixture",
+	"version": "0.1.0",
+	"label": "M4 telemetry gate fixtures",
+	"description": "Deterministic raid/recovery trace, turn-error, and evaluator scenarios.",
+	"dependencies": ["agent_benchmark=0.4.0"]
+}
