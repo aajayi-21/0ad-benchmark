@@ -16,6 +16,20 @@ BenchmarkInterface.prototype.Init = function()
 	this.lifecycle = [];
 	this.trackedQueues = new Map();
 	this.foundations = new Map();
+	// Privileged event ledger: sequence numbers are episode-monotonic; the buffer holds one interval.
+	this.ledger = [];
+	this.ledgerSequence = 0;
+	this.ledgerOverflow = 0;
+	this.lastAttacks = new Map();
+	this.renamedAway = new Set();
+	this.intervalMetrics = new Map();
+	// The template manager forgets an entity before this component sees MT_Destroy, so names
+	// are cached at creation. Static template costs give a fixed valuation for losses.
+	this.templateNames = new Map();
+	this.staticCosts = new Map();
+	// Native Ownership releases the owner while MT_Destroy is dispatched, before this component
+	// runs; the release message records the former owner for the destroy record.
+	this.formerOwners = new Map();
 };
 BenchmarkInterface.prototype.Deserialize = function()
 {
@@ -92,6 +106,7 @@ BenchmarkInterface.prototype.GetPlayer = function(seat)
 BenchmarkInterface.prototype.UpdateKnowledge = function(seats, turn)
 {
 	this.observations.Capture(seats, turn);
+	this.AccumulateMetrics();
 	return true;
 };
 
@@ -119,9 +134,15 @@ BenchmarkInterface.prototype.GetSnapshot = function(seats)
 	return JSON.parse(JSON.stringify({
 		"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
 		"players": Object.fromEntries(seats.map(seat => [seat, this.observations.views[seat]])),
-		"evaluator": { "players": players, "entities": entities },
+		"evaluator": { "players": players, "entities": entities, "player_states": this.GetStatus(seats).player_states },
 		"action_results": this.results, "command_trace": this.commandTrace,
-		"action_lifecycle": this.lifecycle
+		"action_lifecycle": this.lifecycle,
+		"telemetry": this.TelemetryConfigured(),
+		"ledger": {
+			"first_seq": this.ledger.length ? this.ledger[0].seq : this.ledgerSequence + 1,
+			"last_seq": this.ledgerSequence, "overflow": this.ledgerOverflow, "events": this.ledger
+		},
+		"interval_metrics": Object.fromEntries(this.intervalMetrics)
 	}));
 };
 
@@ -239,6 +260,9 @@ BenchmarkInterface.prototype.PrepareDecision = function(json, seats, turn, decis
 	this.results = [];
 	this.commandTrace = [];
 	this.lifecycle = [];
+	this.ledger = [];
+	this.ledgerOverflow = 0;
+	this.intervalMetrics = new Map();
 	const batches = json ? JSON.parse(json) : null;
 	const commands = [];
 	const rejectBatch = (seat, reason) => this.results.push({
@@ -314,7 +338,8 @@ BenchmarkInterface.prototype.RecordCommand = function(seat, command)
 	if (this.commandTrace.length >= 20000)
 		throw new Error("Benchmark command trace capacity exceeded");
 	this.commandTrace.push({
-		"seat": seat, "sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
+		"seat": seat, "turn": this.InProgressTurn(),
+		"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
 		"source": this.executing ? "agent" : QueryPlayerIDInterface(seat)?.IsAI() ? "builtin_ai" : "simulation",
 		"parent_action_id": this.executing?.action_id ?? null,
 		"decision_id": this.executing?.decision_id ?? null,
@@ -434,6 +459,7 @@ BenchmarkInterface.prototype.ExecuteAction = function(seat, envelope)
 
 BenchmarkInterface.prototype.OnGlobalConstructionFinished = function(message)
 {
+	this.Record("construction_finished", { "entity": this.Facts(message.newentity), "foundation_id": message.entity });
 	const original = this.foundations.get(message.entity);
 	if (!original)
 		return;
@@ -443,26 +469,30 @@ BenchmarkInterface.prototype.OnGlobalConstructionFinished = function(message)
 	handles.delete(message.entity);
 	this.lifecycle.push({ "seat": original.seat, "action_id": original.action_id,
 		"decision_id": original.decision_id, "foundation_handle": original.foundation_handle,
-		"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
+		"turn": this.InProgressTurn(), "sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
 		"event": "construction_finished" });
 	this.foundations.delete(message.entity);
 };
 
 BenchmarkInterface.prototype.RecordQueueLifecycle = function(entity, id, event)
 {
+	// The public ProductionQueue hook reports every producer; tracked-queue events are agent feedback.
+	if (event == "cancelled" || event == "production_finished")
+		this.Record("queue_" + event, { "entity": this.Facts(entity), "item_id": id });
 	const key = entity + ":" + id;
 	const original = this.trackedQueues.get(key);
 	if (!original)
 		return;
 	this.lifecycle.push({ "seat": original.seat, "action_id": original.action_id,
-		"decision_id": original.decision_id, "queue_handle": original.queue_handle,
-		"event": event, "sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime() });
+		"decision_id": original.decision_id, "queue_handle": original.queue_handle, "event": event,
+		"turn": this.InProgressTurn(), "sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime() });
 	this.trackedQueues.delete(key);
 };
 
 BenchmarkInterface.prototype.OnGlobalDestroy = function(message)
 {
 	this.observations.Destroy(message.entity);
+	this.RecordDestroy(message.entity);
 	for (const record of this.trackedQueues.values())
 		if (record.producer == message.entity)
 			this.RecordQueueLifecycle(record.producer, record.id, "producer_lost");
@@ -471,7 +501,7 @@ BenchmarkInterface.prototype.OnGlobalDestroy = function(message)
 	{
 		this.lifecycle.push({ "seat": foundation.seat, "action_id": foundation.action_id,
 			"decision_id": foundation.decision_id, "foundation_handle": foundation.foundation_handle,
-			"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
+			"turn": this.InProgressTurn(), "sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
 			"event": "foundation_lost" });
 		this.foundations.delete(message.entity);
 	}
@@ -482,6 +512,7 @@ BenchmarkInterface.prototype.OnGlobalOwnershipChanged = function(message)
 	this.observations.OwnershipChanged(message);
 	if (message.from == message.to)
 		return;
+	this.RecordOwnership(message);
 	// Stop tracking when the producing entity leaves its original owner's control.
 	for (const record of this.trackedQueues.values())
 		if (record.producer == message.entity && record.seat == message.from)
@@ -491,7 +522,7 @@ BenchmarkInterface.prototype.OnGlobalOwnershipChanged = function(message)
 	{
 		this.lifecycle.push({ "seat": foundation.seat, "action_id": foundation.action_id,
 			"decision_id": foundation.decision_id, "foundation_handle": foundation.foundation_handle,
-			"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
+			"turn": this.InProgressTurn(), "sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(),
 			"event": "ownership_lost" });
 		this.foundations.delete(message.entity);
 	}
@@ -500,6 +531,238 @@ BenchmarkInterface.prototype.OnGlobalOwnershipChanged = function(message)
 BenchmarkInterface.prototype.OnGlobalEntityRenamed = function(message)
 {
 	this.observations.Rename(message);
+	if (!this.LedgerEntity(message.entity))
+		return;
+	this.renamedAway.add(message.entity);
+	this.Record("renamed", {
+		"entity": this.Facts(message.entity), "new_entity": this.Facts(message.newentity),
+		"kind": Engine.QueryInterface(message.entity, IID_Foundation) ? "construction_finished" :
+			Engine.QueryInterface(message.entity, IID_Promotion) ? "promotion" : "template_change"
+	});
+};
+
+/**
+ * Privileged telemetry ledger. Handlers only read simulation state; with telemetry disabled
+ * they return immediately, so the gameplay projection is identical either way. Replay playback
+ * never drains the buffer, so nothing is recorded outside a live decision interval.
+ */
+BenchmarkInterface.prototype.TelemetryConfigured = function()
+{
+	return InitAttributes.benchmark?.telemetry !== false;
+};
+
+BenchmarkInterface.prototype.TelemetryEnabled = function()
+{
+	return this.recording && this.TelemetryConfigured();
+};
+
+/**
+ * The turn currently being simulated. Timer time already includes this turn during the update
+ * phase but not during the command flush, so the completed-turn counter is the stable reference.
+ */
+BenchmarkInterface.prototype.InProgressTurn = function()
+{
+	return this.observations.turn + 1;
+};
+
+BenchmarkInterface.prototype.LedgerEntity = function(id)
+{
+	return this.TelemetryEnabled() && !Engine.QueryInterface(id, IID_Mirage) && !!Engine.QueryInterface(id, IID_Identity);
+};
+
+BenchmarkInterface.prototype.OnGlobalCreate = function(message)
+{
+	const name = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager).GetCurrentTemplateName(message.entity);
+	if (name)
+		this.templateNames.set(message.entity, name);
+};
+
+BenchmarkInterface.prototype.StaticCost = function(template)
+{
+	if (!template)
+		return null;
+	if (!this.staticCosts.has(template))
+	{
+		const resources = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager).GetTemplate(template)?.Cost?.Resources;
+		this.staticCosts.set(template, resources ? Object.fromEntries(Object.keys(resources)
+			.filter(key => !key.startsWith("@")).map(key => [key, +resources[key]])) : null);
+	}
+	return this.staticCosts.get(template);
+};
+
+BenchmarkInterface.prototype.Facts = function(id)
+{
+	if (!Engine.QueryInterface(id, IID_Identity))
+		return { "id": id };
+	const position = Engine.QueryInterface(id, IID_Position);
+	const point = position?.IsInWorld() ? position.GetPosition2D() : null;
+	const health = Engine.QueryInterface(id, IID_Health);
+	const template = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager).GetCurrentTemplateName(id) ||
+		this.templateNames.get(id) || null;
+	return {
+		"id": id,
+		"template": template,
+		"owner": Engine.QueryInterface(id, IID_Ownership)?.GetOwner() ?? null,
+		"classes": Engine.QueryInterface(id, IID_Identity).GetClassesList(),
+		"position": point ? { "x": point.x, "z": point.y } : null,
+		"health": health ? { "current": health.GetHitpoints(), "max": health.GetMaxHitpoints() } : null,
+		"cost": this.StaticCost(template),
+		"visible_to": Array.from(this.observations.seats.keys()).filter(seat =>
+			BenchmarkActions.Owned(seat, id) || this.observations.CanSee(seat, id))
+	};
+};
+
+BenchmarkInterface.prototype.Record = function(type, fields)
+{
+	if (!this.TelemetryEnabled())
+		return;
+	const sequence = ++this.ledgerSequence;
+	// Overflow is reported, never silently dropped; the runner invalidates affected scored runs.
+	if (this.ledger.length >= 100000)
+	{
+		++this.ledgerOverflow;
+		return;
+	}
+	this.ledger.push(JSON.parse(JSON.stringify({
+		"seq": sequence, "turn": this.InProgressTurn(),
+		"sim_time_ms": Engine.QueryInterface(SYSTEM_ENTITY, IID_Timer).GetTime(), "type": type, ...fields
+	})));
+};
+
+BenchmarkInterface.prototype.RecordDestroy = function(id)
+{
+	const name = this.templateNames.get(id);
+	this.templateNames.delete(id);
+	const owner = this.formerOwners.get(id);
+	this.formerOwners.delete(id);
+	if (!this.LedgerEntity(id))
+		return;
+	const attack = this.lastAttacks.get(id) ?? null;
+	this.lastAttacks.delete(id);
+	const renamed = this.renamedAway.delete(id);
+	const health = Engine.QueryInterface(id, IID_Health);
+	// A rename replaces an entity; it is not a casualty. A zero-health death without a recorded
+	// attacker was caused by a script, decay, or another non-combat mechanic.
+	const cause = renamed ? "renamed" : health && !health.GetHitpoints() ?
+		(attack && attack.turn == this.InProgressTurn() ? "killed" : "died") : "removed";
+	const facts = this.Facts(id);
+	if (owner !== undefined)
+	{
+		facts.owner = owner;
+		if (this.observations.seats.has(owner) && !facts.visible_to.includes(owner))
+			facts.visible_to.push(owner);
+	}
+	this.Record("destroyed", { "entity": { ...facts, "template": name ?? facts.template }, "cause": cause, "killer": attack });
+};
+
+BenchmarkInterface.prototype.RecordOwnership = function(message)
+{
+	if (message.to == INVALID_PLAYER)
+	{
+		this.formerOwners.set(message.entity, message.from);
+		return;
+	}
+	if (!this.LedgerEntity(message.entity))
+		return;
+	const attack = this.lastAttacks.get(message.entity);
+	const kind = message.from == INVALID_PLAYER ? "created" :
+		attack?.capture && attack.turn >= this.InProgressTurn() - 1 ? "captured" :
+			message.to == 0 && message.from > 0 ? "transferred_to_gaia" : "owner_changed";
+	this.Record("ownership_changed", { "entity": this.Facts(message.entity),
+		"from": message.from, "to": message.to, "kind": kind });
+};
+
+BenchmarkInterface.prototype.OnGlobalAttacked = function(message)
+{
+	if (!this.LedgerEntity(message.target))
+		return;
+	const attack = { "attacker": message.attacker, "attacker_owner": message.attackerOwner,
+		"turn": this.InProgressTurn(), "capture": message.capture > 0 };
+	this.lastAttacks.set(message.target, attack);
+	this.Record("attacked", {
+		"entity": this.Facts(message.target), "attacker": this.Facts(message.attacker),
+		"attacker_owner": message.attackerOwner, "attack_type": message.type,
+		"damage": message.damage, "capture": message.capture, "from_status_effect": message.fromStatusEffect
+	});
+};
+
+BenchmarkInterface.prototype.OnGlobalTrainingFinished = function(message)
+{
+	this.Record("training_finished", { "owner": message.owner,
+		"entities": message.entities.map(id => this.Facts(id)) });
+};
+
+BenchmarkInterface.prototype.OnGlobalResearchFinished = function(message)
+{
+	this.Record("research_finished", { "player": message.player, "technology": message.tech });
+};
+
+BenchmarkInterface.prototype.OnGlobalGarrisonedUnitsChanged = function(message)
+{
+	this.Record("garrison_changed", {
+		"added": message.added.map(id => ({ ...this.Facts(id),
+			"holder": Engine.QueryInterface(id, IID_Garrisonable)?.HolderID() ?? null })),
+		"removed": message.removed.map(id => this.Facts(id))
+	});
+};
+
+BenchmarkInterface.prototype.OnGlobalPlayerWon = function(message)
+{
+	this.Record("player_won", { "player": message.playerId });
+};
+
+BenchmarkInterface.prototype.OnGlobalPlayerDefeated = function(message)
+{
+	this.Record("player_defeated", { "player": message.playerId });
+};
+
+/** Per-turn integrals for idle/production diagnostics. Eligibility is gathering capability. */
+BenchmarkInterface.prototype.AccumulateMetrics = function()
+{
+	if (!this.TelemetryEnabled())
+		return;
+	const count = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager).GetNumPlayers();
+	const metrics = player =>
+	{
+		if (!this.intervalMetrics.has(player))
+			this.intervalMetrics.set(player, { "turns": 0, "worker_turns": 0, "idle_worker_turns": 0,
+				"gathering_worker_turns": 0, "combat_worker_turns": 0, "producer_turns": 0,
+				"active_producer_turns": 0, "blocked_producer_turns": 0, "empty_producer_turns": 0 });
+		return this.intervalMetrics.get(player);
+	};
+	for (let player = 1; player < count; ++player)
+		++metrics(player).turns;
+	for (const id of Engine.GetEntitiesWithInterface(IID_ResourceGatherer))
+	{
+		const owner = Engine.QueryInterface(id, IID_Ownership)?.GetOwner() ?? 0;
+		const unitAI = Engine.QueryInterface(id, IID_UnitAI);
+		if (owner < 1 || !unitAI || Engine.QueryInterface(id, IID_Mirage))
+			continue;
+		const record = metrics(owner);
+		const state = unitAI.GetCurrentState();
+		++record.worker_turns;
+		if (unitAI.IsIdle())
+			++record.idle_worker_turns;
+		else if (state.includes(".GATHER") || state.includes(".RETURNRESOURCE"))
+			++record.gathering_worker_turns;
+		else if (state.includes(".COMBAT"))
+			++record.combat_worker_turns;
+	}
+	for (const id of Engine.GetEntitiesWithInterface(IID_ProductionQueue))
+	{
+		const owner = Engine.QueryInterface(id, IID_Ownership)?.GetOwner() ?? 0;
+		if (owner < 1 || Engine.QueryInterface(id, IID_Foundation) || Engine.QueryInterface(id, IID_Mirage))
+			continue;
+		const record = metrics(owner);
+		const queue = Engine.QueryInterface(id, IID_ProductionQueue).GetQueue();
+		++record.producer_turns;
+		if (!queue.length)
+			++record.empty_producer_turns;
+		else if (queue[0].paused)
+			++record.blocked_producer_turns;
+		else
+			++record.active_producer_turns;
+	}
 };
 
 Engine.RegisterSystemComponentType(IID_BenchmarkInterface, "BenchmarkInterface", BenchmarkInterface);

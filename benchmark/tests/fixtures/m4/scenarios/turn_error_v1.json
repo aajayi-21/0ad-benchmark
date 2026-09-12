@@ -1,0 +1,22 @@
+{
+	"schema_version": 1,
+	"id": "turn_error_v1",
+	"description": "Infrastructure failure fixture: the simulation logs an error at turn 10.",
+	"map": {"type": "random", "path": "maps/random/m4_raid"},
+	"settings": {"Size": 128, "StartingResources": 2000},
+	"seed_bundle": {"map": 7, "ai": 11},
+	"controllers": {
+		"1": {"kind": "external", "civilization": "athen"},
+		"2": {"kind": "passive", "civilization": "athen"}
+	},
+	"schedule": {"decision_turns": 25, "turn_limit": 100},
+	"objective": {
+		"evaluator": "preserve_entity_v1",
+		"player": 1,
+		"params": {"template_suffix": "civil_centre", "until_turn": 100},
+		"success": "The civic centre survives to turn 100."
+	},
+	"trigger_scripts": ["scripts/m4_turn_error.js"],
+	"mods": ["agent_benchmark", "m4_fixture"],
+	"assets": ["maps/random/m4_raid.js", "maps/scripts/m4_turn_error.js"]
+}
