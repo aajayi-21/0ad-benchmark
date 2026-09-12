@@ -1,0 +1,63 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark",
+		"agent_benchmark_suite"
+	],
+	"settings": {
+		"Size": 128,
+		"StartingResources": 300,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "scouting_response_v1",
+	"description": "Find the hidden enemy camp (three spearmen north-east or south-west of the base) and destroy it by turn 1800.",
+	"map": {
+		"type": "random",
+		"path": "maps/random/suite_scouting"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "passive",
+			"civilization": "athen"
+		}
+	},
+	"schedule": {
+		"decision_turns": 25,
+		"turn_limit": 1800
+	},
+	"objective": {
+		"evaluator": "entity_count_v1",
+		"player": 2,
+		"params": {
+			"class": "Unit",
+			"max_count": 0,
+			"by_turn": 1800
+		},
+		"success": "Player 2 owns no units at a decision boundary by turn 1800.",
+		"public": "An enemy camp of a few soldiers waits somewhere about 120 meters north-east or south-west of your civic centre. Find it and destroy every enemy unit before turn 1800. Your soldiers must be able to see a target to attack it.",
+		"stop_on_success": true
+	},
+	"trigger_scripts": [],
+	"assets": [
+		"maps/random/suite_scouting.js",
+		"maps/random/suite/common.js"
+	],
+	"baseline": "scout_strike",
+	"family": "scouting"
+}

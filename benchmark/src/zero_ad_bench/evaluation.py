@@ -31,16 +31,59 @@ def reached_phase_v1(params, snapshots, _outcome):
 
 
 def entity_count_v1(params, snapshots, _outcome):
-    """Own at least `min_count` matching entities at a boundary within `(after_turn, by_turn]`."""
-    minimum = int(params["min_count"])
+    """Match a count bound at a boundary within `(after_turn, by_turn]`.
+
+    `min_count` succeeds when the player owns at least that many matching entities;
+    `max_count` succeeds when the player owns at most that many (for example zero enemy
+    structures of a kind, measured from the privileged snapshot of that player).
+    """
+    minimum = params.get("min_count")
+    maximum = params.get("max_count")
     after = int(params.get("after_turn", -1))
     by_turn = int(params["by_turn"])
     for snapshot in snapshots:
         player = _player(snapshot, params["player"])
         count = _count(player, params.get("template_suffix"), params.get("class"))
-        if after < snapshot["turn"] <= by_turn and count >= minimum:
+        satisfied = (minimum is None or count >= int(minimum)) and (
+            maximum is None or count <= int(maximum)
+        )
+        if after < snapshot["turn"] <= by_turn and satisfied:
             return {"success": True, "achieved_turn": snapshot["turn"], "count": count}
     return {"success": False, "achieved_turn": None}
+
+
+def structure_in_region_v1(params, snapshots, _outcome):
+    """Complete an eligible structure inside the bounds and keep one there for `hold_turns`.
+
+    A completed (non-foundation) structure whose template ends with one of
+    `template_suffixes` must lie inside the half-open bounds at every boundary of a window of
+    `hold_turns` turns that ends by `by_turn`. Foundations do not count; a structure lost and
+    rebuilt restarts the window.
+    """
+    bounds = params["bounds"]
+    suffixes = tuple(params["template_suffixes"])
+    hold = int(params["hold_turns"])
+    by_turn = int(params["by_turn"])
+    start = None
+    for snapshot in snapshots:
+        if snapshot["turn"] > by_turn:
+            break
+        player = _player(snapshot, params["player"])
+        present = any(
+            not s["foundation"]
+            and s["template"].endswith(suffixes)
+            and bounds["min_x"] <= s["x"] < bounds["max_x"]
+            and bounds["min_z"] <= s["z"] < bounds["max_z"]
+            for s in player.get("structures", [])
+        )
+        if not present:
+            start = None
+            continue
+        if start is None:
+            start = snapshot["turn"]
+        if snapshot["turn"] - start >= hold:
+            return {"success": True, "achieved_turn": snapshot["turn"], "held_since_turn": start}
+    return {"success": False, "achieved_turn": None, "held_since_turn": start}
 
 
 def preserve_entity_v1(params, snapshots, _outcome):
@@ -72,6 +115,7 @@ EVALUATORS = {
     "reached_phase_v1": reached_phase_v1,
     "entity_count_v1": entity_count_v1,
     "preserve_entity_v1": preserve_entity_v1,
+    "structure_in_region_v1": structure_in_region_v1,
     "conquest_v1": conquest_v1,
 }
 

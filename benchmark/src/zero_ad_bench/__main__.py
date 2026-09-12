@@ -6,7 +6,8 @@ import signal
 import sys
 from pathlib import Path
 
-from zero_ad_bench import PACKAGE_VERSION, report
+from zero_ad_bench import PACKAGE_VERSION, investigate, report
+from zero_ad_bench import experiment as experiments
 from zero_ad_bench.agents import make_controller
 from zero_ad_bench.engine import DEFAULT_ENGINE, EngineProcess
 from zero_ad_bench.environment import Episode, RunOptions
@@ -170,6 +171,49 @@ def check(args):
     return 0 if outcome.get("model_found", True) and outcome.get("executable", True) else 1
 
 
+def run_experiment(args):
+    config = (
+        json.loads(Path(args.experiment_config).read_text()) if args.experiment_config else None
+    )
+    plan, scenarios = experiments.build_plan(
+        args.suite,
+        args.split,
+        args.controllers.split(","),
+        experiment_config=config,
+        trials_per_seed=args.trials,
+        scenario_ids=args.scenarios.split(",") if args.scenarios else None,
+        engine=args.engine,
+        options={"decision_deadline_s": args.decision_deadline},
+    )
+    rows, _summary = experiments.run_plan(
+        plan,
+        scenarios,
+        args.output,
+        experiment_config=config,
+        engine=args.engine,
+        decision_deadline_s=args.decision_deadline,
+        process_deadline_s=args.process_deadline,
+        mod_sources={name: Path(path) for name, path in _pairs(args.mod_source).items()},
+    )
+    print(
+        json.dumps(
+            {
+                "output": args.output,
+                "attempted": len(rows),
+                "accounting": experiments.analysis.accounting(rows),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def run_investigate(args):
+    text = investigate.investigate(args.experiment, limit=args.limit, window=args.window)
+    print(text if args.print else f"wrote {Path(args.experiment) / 'failure-investigation.md'}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="zero_ad_bench")
     parser.add_argument("--version", action="version", version=PACKAGE_VERSION)
@@ -212,6 +256,29 @@ def main(argv=None):
     checker = commands.add_parser("check", help="validate a provider config without spending")
     checker.add_argument("--experiment-config", required=True)
     checker.set_defaults(handler=check)
+    trial = commands.add_parser("experiment", help="run a preregistered trial set from a suite")
+    trial.add_argument("--suite", required=True)
+    trial.add_argument("--split", default="development")
+    trial.add_argument(
+        "--controllers", default="noop,random,scripted", help="comma-separated specs"
+    )
+    trial.add_argument("--scenarios", help="comma-separated scenario ids (default: all)")
+    trial.add_argument("--trials", type=int, default=1, help="trials per seed")
+    trial.add_argument("--output", required=True)
+    trial.add_argument("--experiment-config", help="experiment JSON for model trials")
+    trial.add_argument("--mod-source", action="append", metavar="NAME=PATH")
+    trial.add_argument("--engine", default=str(DEFAULT_ENGINE))
+    trial.add_argument("--decision-deadline", type=float, default=30.0)
+    trial.add_argument("--process-deadline", type=float, default=1800.0)
+    trial.set_defaults(handler=run_experiment)
+    inv = commands.add_parser(
+        "investigate", help="write a failure investigation for an experiment"
+    )
+    inv.add_argument("experiment")
+    inv.add_argument("--limit", type=int, default=3)
+    inv.add_argument("--window", type=int, default=6)
+    inv.add_argument("--print", action="store_true")
+    inv.set_defaults(handler=run_investigate)
     args = parser.parse_args(argv)
     return args.handler(args)
 

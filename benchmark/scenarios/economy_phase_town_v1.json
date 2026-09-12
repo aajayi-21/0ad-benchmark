@@ -1,0 +1,62 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark",
+		"agent_benchmark_suite"
+	],
+	"settings": {
+		"Size": 128,
+		"StartingResources": 300,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "economy_phase_town_v1",
+	"description": "Develop the economy and reach Town Phase before turn 4500 (15 simulated minutes).",
+	"map": {
+		"type": "random",
+		"path": "maps/random/suite_economy"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "passive",
+			"civilization": "athen"
+		}
+	},
+	"schedule": {
+		"decision_turns": 50,
+		"turn_limit": 4500
+	},
+	"objective": {
+		"evaluator": "reached_phase_v1",
+		"player": 1,
+		"params": {
+			"phase": "town",
+			"by_turn": 4500
+		},
+		"success": "Player 1 has researched a phase_town technology at a decision boundary by turn 4500.",
+		"public": "Reach Town Phase (research phase_town_athen at your civic centre) before turn 4500. Town Phase needs five Village-class structures (houses, storehouses, farmsteads, barracks) plus 500 food and 500 wood.",
+		"stop_on_success": true
+	},
+	"trigger_scripts": [],
+	"assets": [
+		"maps/random/suite_economy.js",
+		"maps/random/suite/common.js"
+	],
+	"baseline": "economy",
+	"family": "economy"
+}

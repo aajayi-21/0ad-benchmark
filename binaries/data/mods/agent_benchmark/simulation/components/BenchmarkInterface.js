@@ -71,7 +71,7 @@ BenchmarkInterface.prototype.GetEntity = function(id)
 			"amount": supply.IsInfinite() ? null : supply.GetCurrentAmount(),
 			"infinite": supply.IsInfinite()
 		} : null,
-		"buildable": query(IID_Builder)?.GetEntitiesList() ?? [],
+		"buildable": BenchmarkActions.Buildable(id),
 		"trainable": query(IID_Trainer)?.GetEntitiesList() ?? [],
 		"researchable": query(IID_Researcher)?.GetTechnologiesList() ?? []
 	};
@@ -161,9 +161,10 @@ BenchmarkInterface.prototype.BuildCatalog = function(seat, names, technologies)
 		if (BenchmarkActions.Owned(seat, id))
 		{
 			permitted.add(templateManager.GetCurrentTemplateName(id));
-			for (const iid of [IID_Builder, IID_Trainer])
-				for (const name of Engine.QueryInterface(id, iid)?.GetEntitiesList() ?? [])
-					permitted.add(name);
+			for (const name of BenchmarkActions.Buildable(id))
+				permitted.add(name);
+			for (const name of Engine.QueryInterface(id, IID_Trainer)?.GetEntitiesList() ?? [])
+				permitted.add(name);
 		}
 	const validName = name => typeof name == "string" && name.length <= 200 &&
 		/^[a-z0-9_/-]+$/.test(name) && !name.includes("//");
