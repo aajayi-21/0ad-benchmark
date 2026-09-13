@@ -6,7 +6,7 @@ import signal
 import sys
 from pathlib import Path
 
-from zero_ad_bench import PACKAGE_VERSION, investigate, report
+from zero_ad_bench import PACKAGE_VERSION, competition, investigate, report
 from zero_ad_bench import experiment as experiments
 from zero_ad_bench.agents import make_controller
 from zero_ad_bench.engine import DEFAULT_ENGINE, EngineProcess
@@ -208,6 +208,52 @@ def run_experiment(args):
     return 0
 
 
+def run_compete(args):
+    participants = dict(
+        competition.parse_participant(item) for item in args.participants.split(",")
+    )
+    matchups = competition.parse_matchups(args.matchups, participants)
+    plan, scenarios = competition.build_match_plan(
+        args.competition,
+        args.split,
+        participants,
+        matchups,
+        trials_per_pair=args.trials,
+        scenario_ids=args.scenarios.split(",") if args.scenarios else None,
+        engine=args.engine,
+        options={
+            "decision_deadline_s": args.decision_deadline,
+            "turn_limit_override": args.turn_limit,
+        },
+    )
+    rows, summary = competition.run_match_plan(
+        plan,
+        scenarios,
+        participants,
+        args.output,
+        engine=args.engine,
+        decision_deadline_s=args.decision_deadline,
+        process_deadline_s=args.process_deadline,
+        mod_sources={name: Path(path) for name, path in _pairs(args.mod_source).items()},
+        turn_limit_override=args.turn_limit,
+    )
+    print(
+        json.dumps(
+            {"output": args.output, "attempted": len(rows), "accounting": summary["accounting"]},
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def run_replay_view(args):
+    """Write the viewable replay copy and print the client command that plays it."""
+    target = report.viewable_replay(args.episode)
+    mods = " ".join(f"--mod={name}" for name in args.mods.split(","))
+    print(f"{Path(args.engine).resolve()} {mods} --replay-visual={target}")
+    return 0
+
+
 def run_investigate(args):
     text = investigate.investigate(args.experiment, limit=args.limit, window=args.window)
     print(text if args.print else f"wrote {Path(args.experiment) / 'failure-investigation.md'}")
@@ -271,6 +317,39 @@ def main(argv=None):
     trial.add_argument("--decision-deadline", type=float, default=30.0)
     trial.add_argument("--process-deadline", type=float, default=1800.0)
     trial.set_defaults(handler=run_experiment)
+    match = commands.add_parser(
+        "compete", help="play a preregistered set of two-seat matches between agents"
+    )
+    match.add_argument("--competition", required=True, help="competition manifest JSON")
+    match.add_argument("--split", default="development")
+    match.add_argument(
+        "--participants",
+        required=True,
+        help="comma-separated id=controller[:config], e.g. muse=model:cfg.json,eco=economy",
+    )
+    match.add_argument(
+        "--matchups", required=True, help="comma-separated id:id pairs; id:id itself is a mirror"
+    )
+    match.add_argument("--scenarios", help="comma-separated match scenario ids (default: all)")
+    match.add_argument("--trials", type=int, help="trials per seed pair (default: manifest)")
+    match.add_argument("--output", required=True)
+    match.add_argument(
+        "--turn-limit", type=int, help="shortened horizon for development runs only"
+    )
+    match.add_argument("--mod-source", action="append", metavar="NAME=PATH")
+    match.add_argument("--engine", default=str(DEFAULT_ENGINE))
+    match.add_argument("--decision-deadline", type=float, default=30.0)
+    match.add_argument("--process-deadline", type=float, default=1800.0)
+    match.set_defaults(handler=run_compete)
+    view = commands.add_parser(
+        "replay-view", help="prepare an episode's replay for the graphical client"
+    )
+    view.add_argument("episode")
+    view.add_argument(
+        "--mods", default="public,agent_benchmark", help="comma-separated mods to load"
+    )
+    view.add_argument("--engine", default=str(DEFAULT_ENGINE))
+    view.set_defaults(handler=run_replay_view)
     inv = commands.add_parser(
         "investigate", help="write a failure investigation for an experiment"
     )

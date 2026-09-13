@@ -111,11 +111,54 @@ def conquest_v1(params, _snapshots, outcome):
     return {"success": None, "achieved_turn": None}
 
 
+def match_v1(params, _snapshots, outcome):
+    """Per-side outcome of a multi-seat match under the frozen competition rules.
+
+    In-game: a seat marked `won` wins, `defeated` loses, and a turn limit is a draw. The runner's
+    administrative outcomes (forfeit after consecutive decision failures, budget stop, agent
+    stop) override the engine: the surviving seat wins administratively, and forfeits at the
+    same decision are an administrative draw even though the engine, applying the resignations
+    in seat order, may have marked the later seat as the winner.
+    """
+    seats = [str(seat) for seat in params.get("seats", [1, 2])]
+    states = outcome.get("player_states") or {}
+    administrative = {
+        seat: entry
+        for seat, entry in (outcome.get("administrative") or {}).items()
+        if entry and seat in seats
+    }
+    if not outcome.get("terminal_reason"):
+        return {"success": None, "achieved_turn": None, "sides": None}
+    simultaneous = len(administrative) == len(seats) and (
+        len({entry.get("turn") for entry in administrative.values()}) == 1
+    )
+    sides = {}
+    for seat in seats:
+        if simultaneous:
+            sides[seat] = "draw"
+        elif seat in administrative:
+            sides[seat] = "loss"
+        elif administrative or states.get(seat) == "won":
+            sides[seat] = "win"
+        elif states.get(seat) == "defeated":
+            sides[seat] = "loss"
+        else:
+            sides[seat] = "draw"
+    return {
+        "success": None,
+        "achieved_turn": None,
+        "sides": sides,
+        "administrative_outcome": {s: e["kind"] for s, e in administrative.items()} or None,
+        "player": str(params["player"]),
+    }
+
+
 EVALUATORS = {
     "reached_phase_v1": reached_phase_v1,
     "entity_count_v1": entity_count_v1,
     "preserve_entity_v1": preserve_entity_v1,
     "structure_in_region_v1": structure_in_region_v1,
+    "match_v1": match_v1,
     "conquest_v1": conquest_v1,
 }
 
@@ -152,10 +195,12 @@ def score(evaluation, _outcome, status, administrative, invalid_reasons):
         return "incomplete" if status == "running" else "invalid"
     if invalid_reasons:
         return "invalid"
-    if any(administrative.values()):
+    if "sides" in evaluation:
+        # A match reports the objective player's side; administrative rules are inside.
+        sides = evaluation["sides"]
+        return sides[evaluation["player"]] if sides else "incomplete"
+    if any(administrative.values()) or evaluation["success"] is False:
         return "failure"
     if evaluation["success"] is True:
         return "success"
-    if evaluation["success"] is False:
-        return "failure"
     return "incomplete" if status == "interrupted" else "failure"

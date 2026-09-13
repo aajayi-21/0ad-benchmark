@@ -1,0 +1,64 @@
+{
+	"schema_version": 1,
+	"information": "partial_v1",
+	"mods": [
+		"agent_benchmark"
+	],
+	"settings": {
+		"Size": 128,
+		"Biome": "generic/temperate",
+		"PlayerPlacement": "circle",
+		"StartingResources": 300,
+		"PopulationCap": 300
+	},
+	"seed_bundle": {
+		"map": 101,
+		"ai": 1101
+	},
+	"victory_conditions": [
+		"conquest"
+	],
+	"limits": {
+		"actions_per_decision": 20,
+		"group_size": 64,
+		"train_batch": 5,
+		"reads_per_decision": 8
+	},
+	"id": "match_conquest_v1",
+	"description": "Two-seat match: conquest on Mainland between two external agents with no built-in AI, decided by turn 12000 or drawn.",
+	"map": {
+		"type": "random",
+		"path": "maps/random/mainland"
+	},
+	"controllers": {
+		"1": {
+			"kind": "external",
+			"civilization": "athen"
+		},
+		"2": {
+			"kind": "external",
+			"civilization": "athen"
+		}
+	},
+	"schedule": {
+		"decision_turns": 50,
+		"turn_limit": 12000
+	},
+	"objective": {
+		"evaluator": "match_v1",
+		"player": 1,
+		"params": {
+			"seats": [
+				1,
+				2
+			]
+		},
+		"success": "Each seat's result: win, draw, or loss; administrative outcomes are recorded separately.",
+		"public": "Two-player match against another agent controlling the other civilisation. Win by conquest: destroy or capture all enemy conquest-critical entities before turn 12000. Reaching the turn limit is a draw. Both players receive their observations from the same completed turn and their orders enter the game together.",
+		"stop_on_success": false
+	},
+	"trigger_scripts": [],
+	"assets": [],
+	"baseline": "economy",
+	"family": "match"
+}

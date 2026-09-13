@@ -16,7 +16,7 @@ from zero_ad_bench.environment import BudgetExceeded
 from zero_ad_bench.providers import ProviderError, ProviderRequest, ToolSpec, tool_schema_hash
 
 
-SCAFFOLD_VERSION = "2"
+SCAFFOLD_VERSION = "3"
 
 # Public action families (M2 contract): required inputs and the scaffold's documented defaults
 # for inputs a model may omit. The engine contract stays strict; the scaffold fills these
@@ -126,8 +126,9 @@ def _schema(properties, required):
 TOOLS = [
     ToolSpec(
         "read_briefing",
-        "Read the next page of the deterministic text briefing for the "
-        "current observation. Pass the cursor from a previous page to continue.",
+        "Read the next page of the deterministic text briefing for the current "
+        "observation. The automatic first page holds up to 256 rows, so call this only when "
+        "the decision header reports omitted rows, passing the cursor it gives.",
         _schema(
             {
                 "cursor": {"type": ["string", "null"]},
@@ -237,12 +238,17 @@ are rejected. If a submitted batch has schema problems, submit_actions returns a
 each problem and nothing is submitted; fix the batch and call submit_actions again.
 
 Budget per decision: at most 20 actions, a fixed number of read tool calls, and a fixed number
-of model requests; the remaining counts are stated in each decision header. Finish every
-decision by calling submit_actions exactly once (an empty list means wait). If you cannot
-decide, submit an empty list rather than nothing. Keep private notes with write_notes; they
-are the only memory carried between decisions besides the observation itself. You may call
-several tools in one response: read what you need together, and call write_notes in the same
-response as submit_actions so notes never cost a separate model request.
+of model requests; the remaining counts are stated in each decision header and after every
+tool result. Every model request counts, including reads, so read only what you need. The
+last model request of a decision accepts only submit_actions and the scaffold forces that
+tool; a decision that never submits is a wait. Finish every decision by calling submit_actions
+exactly once (an empty list means wait). If you cannot decide, submit an empty list rather
+than nothing. Keep private notes with write_notes; they are the only memory carried between
+decisions besides the observation itself. You may call several tools in one response: read
+what you need together, and call write_notes in the same response as submit_actions so notes
+never cost a separate model request. Build orders report the engine's placement reason when
+they fail (obstructed, invalid terrain, outside your territory, unexplored ground); choose
+another position instead of resubmitting the same one.
 """
 
 JSON_FALLBACK_PROMPT = """
@@ -356,6 +362,18 @@ class ModelController:
             f"Your private notes ({len(self.notes)}/{self.notes_max_chars} chars):\n"
             f"{self.notes or '(empty)'}\n"
         )
+
+    @staticmethod
+    def requests_notice(requests_left):
+        """Tell the model, beside a tool result, how many model requests remain."""
+        if requests_left <= 0:
+            return "No model requests left this decision; it ends as a wait."
+        if requests_left == 1:
+            return (
+                "1 model request left this decision: it must call submit_actions "
+                "(an empty list waits); the scaffold accepts no other tool for it."
+            )
+        return f"{requests_left} model requests left this decision."
 
     # Tool execution
 
@@ -515,6 +533,7 @@ class ModelController:
             if output_left <= 0:
                 reason = "decision_output_tokens_exhausted"
                 break
+            last_request = request_index == self.requests_per_decision - 1
             request = ProviderRequest(
                 model=self.provider.model,
                 system=self.system,
@@ -524,6 +543,7 @@ class ModelController:
                 temperature=self.temperature,
                 effort=self.effort,
                 thinking=self.thinking,
+                force_tool="submit_actions" if last_request else None,
             )
             response = self._call(gateway, request, request_index, started)
             requests_used += 1
@@ -559,7 +579,12 @@ class ModelController:
                 if submission is not None:
                     final = submission
                     break
-            messages.append({"role": "tool", "results": results})
+            tool_message = {"role": "tool", "results": results}
+            if final is None:
+                tool_message["note"] = self.requests_notice(
+                    self.requests_per_decision - requests_used
+                )
+            messages.append(tool_message)
             if final is not None:
                 reason = "submitted"
                 break

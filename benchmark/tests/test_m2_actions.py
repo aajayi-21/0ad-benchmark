@@ -317,6 +317,10 @@ class TestM2Actions(unittest.TestCase):
         for action in ("hidden", "nested", "outside"):
             self.assertEqual(results[action]["stage"], "rejected", results[action])
         self.assertEqual(results["blocked"]["stage"], "failed")
+        # The engine's placement verdict reaches the player instead of an opaque failure.
+        self.assertEqual(results["blocked"]["reason"], "placement_rejected")
+        self.assertIn("cannot be built", results["blocked"]["message"])
+        self.assertNotIn("%(", results["blocked"]["message"])
         self.applied(response, "valid")
         self.assertFalse(
             any(item["template"].startswith("foundation|") for item in self.own("house"))

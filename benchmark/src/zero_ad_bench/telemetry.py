@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -82,6 +83,8 @@ class EpisodeArtifacts:
         self.handles = {}
         self.counts = dict.fromkeys(STREAMS, 0)
         self.manifest = None
+        # Controllers of different seats decide concurrently and record through the gateway.
+        self.lock = threading.Lock()
 
     def start(self, manifest):
         self.manifest = {
@@ -98,10 +101,12 @@ class EpisodeArtifacts:
             self.handles[stream] = (self.directory / f"{stream}.jsonl").open("a", encoding="utf-8")
 
     def append(self, stream, record):
-        handle = self.handles[stream]
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
-        handle.flush()
-        self.counts[stream] += 1
+        line = json.dumps(record, sort_keys=True) + "\n"
+        with self.lock:
+            handle = self.handles[stream]
+            handle.write(line)
+            handle.flush()
+            self.counts[stream] += 1
 
     def write_json(self, name, value):
         write_json_atomic(self.directory / name, value)

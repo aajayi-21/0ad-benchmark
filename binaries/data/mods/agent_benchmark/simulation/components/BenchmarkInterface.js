@@ -392,6 +392,10 @@ BenchmarkInterface.prototype.ExecuteAction = function(seat, envelope)
 	const producer = command.entity ?? command.entities[0];
 	const queue = Engine.QueryInterface(producer ?? INVALID_ENTITY, IID_ProductionQueue);
 	const beforeQueue = queue?.GetQueue() ?? [];
+	// A rejected placement is reported to the player as a timed GUI notification; remember
+	// where the notification log stood so the reason can be attached to the result.
+	const gui = Engine.QueryInterface(SYSTEM_ENTITY, IID_GuiInterface);
+	const lastNotification = command.type == "construct" ? gui.timeNotificationID : undefined;
 	this.executing = envelope;
 	this.issuedOrders = new Map();
 	let nativeResult;
@@ -405,6 +409,17 @@ BenchmarkInterface.prototype.ExecuteAction = function(seat, envelope)
 	}
 	if (!this.recording)
 		return;
+	if (command.type == "construct" && !nativeResult)
+	{
+		const notification = gui.timeNotifications.find(item => item.id > lastNotification &&
+			item.players?.includes(seat) && typeof item.message == "string");
+		if (notification)
+		{
+			result.reason = "placement_rejected";
+			result.message = notification.message.replace(/%\((\w+)\)s/g,
+				(match, key) => String(notification.parameters?.[key] ?? match));
+		}
+	}
 	const afterQueue = queue?.GetQueue() ?? [];
 	const newItem = afterQueue.find(item => !beforeQueue.some(previous => previous.id == item.id));
 	const expectedOrder = { "walk": "Walk", "attack-walk": "WalkAndFight", "attack": "Attack",

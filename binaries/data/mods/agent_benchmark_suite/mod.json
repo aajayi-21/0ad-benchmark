@@ -3,5 +3,5 @@
 	"version": "0.1.0",
 	"label": "Strategic agent benchmark scenario suite",
 	"description": "Deterministic goal scenarios for the agent benchmark: maps and trigger scripts.",
-	"dependencies": ["agent_benchmark=0.4.1"]
+	"dependencies": ["agent_benchmark=0.4.2"]
 }

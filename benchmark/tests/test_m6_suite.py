@@ -84,7 +84,7 @@ class TestM6Suite(unittest.TestCase):
             scenarios["raid_defense_v1"].resolve()["settings"]["TriggerScripts"],
             ["scripts/suite_raid.js"],
         )
-        self.assertEqual(suite["versions"]["scaffold"], "2")
+        self.assertEqual(suite["versions"]["scaffold"], "3")
 
     def test_scripted_baselines_demonstrate_feasibility(self):
         _, scenarios, _ = experiment.load_suite(SUITE)
@@ -227,7 +227,7 @@ class TestM6Suite(unittest.TestCase):
             suite_dir / "suite_tiny.json", "development", ["noop", "scripted"]
         )
         self.assertEqual(plan["trial_count"], 8)
-        self.assertEqual(plan["versions"]["scaffold"], "2")
+        self.assertEqual(plan["versions"]["scaffold"], "3")
         self.assertTrue(plan["versions"]["engine_binary_sha256"])
         output = self.directory / "experiment"
         rows, summary = experiment.run_plan(

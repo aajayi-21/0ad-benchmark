@@ -212,14 +212,18 @@ def run_trial(
     mod_sources,
 ):
     scenario = scenario.with_seeds(trial["seed"], trial["ai_seed"])
-    controller = make_trial_controller(
-        trial["controller"], scenario, trial["seed"], experiment_config
-    )
+    # One instance per seat: a controller's private state must never be shared across seats.
+    controllers = {
+        seat: make_trial_controller(
+            trial["controller"], scenario, trial["seed"], experiment_config
+        )
+        for seat in (scenario.external_seats() or [1])
+    }
     episode_root = output_root / "episodes"
     label = trial["trial_id"].replace("/", "_")
     row = {
         **trial,
-        "controller_name": controller.name,
+        "controller_name": next(iter(controllers.values())).name,
         "episode": None,
         "status": "failed",
         "result": "invalid",
@@ -248,7 +252,7 @@ def run_trial(
         )
         episode = Episode(
             scenario,
-            dict.fromkeys(scenario.external_seats(), controller) or {1: controller},
+            controllers,
             process,
             episode_root,
             options,

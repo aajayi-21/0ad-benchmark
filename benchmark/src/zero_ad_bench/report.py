@@ -99,7 +99,11 @@ def build_result(directory, override=None):
     resolved = episode["resolved"]
     verdict = None
     if resolved:
-        verdict = evaluation.evaluate(resolved["scenario"]["objective"], snapshots, outcome)
+        verdict = evaluation.evaluate(
+            resolved["scenario"]["objective"],
+            snapshots,
+            {**outcome, "administrative": administrative},
+        )
     if status == "completed" and invalid:
         status = "invalid"
     decisions = Counter(d["outcome"] for d in streams["decisions"])
@@ -607,6 +611,43 @@ def build_report(directory, result=None):
         "",
     ]
     return "\n".join(lines)
+
+
+def display_settings(attributes):
+    """Return the settings the graphical client reads but the headless bridge never needed.
+
+    `mapName` is the loading screen's title. `PopulationCapType` names the cap the session's
+    match-settings dialog describes; the engine already applies the per-player cap when the
+    field is absent, so naming it changes nothing in the simulation.
+    """
+    settings = attributes.get("settings", {})
+    fields = {"mapName": Path(attributes.get("map", "map")).name.replace("_", " ").title()}
+    if "PopulationCap" in settings:
+        fields["PopulationCapType"] = "player"
+    return fields
+
+
+def viewable_replay(directory):
+    """Write `replay/commands-view.txt`: the recorded log plus the display fields the client needs.
+
+    A recorded `start` line lacks the display settings, so a visual replay fails before the
+    session opens. The copy adds those settings only; every command line stays as recorded,
+    so the copy plays the same game.
+    """
+    directory = Path(directory).resolve()
+    source = directory / "replay/commands.txt"
+    lines = source.read_text(encoding="utf-8").split("\n")
+    prefix = "start "
+    if not lines or not lines[0].startswith(prefix):
+        raise ValueError(f"{source} does not begin with a start line")
+    attributes = json.loads(lines[0][len(prefix) :])
+    settings = attributes.setdefault("settings", {})
+    for key, value in display_settings(attributes).items():
+        settings.setdefault(key, value)
+    lines[0] = prefix + json.dumps(attributes, separators=(",", ":"))
+    target = directory / "replay/commands-view.txt"
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
 
 
 def verify(directory, *, replay=False, engine=None, mod_sources=None, work_dir=None):

@@ -107,7 +107,7 @@ class PlayerGateway:
     def inspect(self, kind, **fields):
         return self._tool("inspect", self._inspect_body(kind, fields))
 
-    def briefing(self, max_chars=32768, limit=64):
+    def briefing(self, max_chars=32768, limit=256):
         """Return the initial text observation; it is supplied automatically, not charged.
 
         The largest page the engine allows is requested so the model rarely needs a second
@@ -279,6 +279,7 @@ class Episode:
             "sim_time_ms": self.sim_time_ms,
             "player_states": {str(i + 1): s for i, s in enumerate(states)},
             "stopped_on_success": self.stopped_on_success,
+            "administrative": {str(seat): self.administrative[seat] for seat in self.seats},
         }
 
     def _stop_reason(self):
@@ -370,50 +371,90 @@ class Episode:
             "telemetry": self.data.get("telemetry"),
         }
 
-    def _collect(self, controller, gateway):
-        """Run one controller under the wall-clock deadline; simulated time stays paused."""
-        holder = {}
+    def _collect_all(self, decision_id, turn):
+        """Run every seat's controller concurrently under one shared wall-clock deadline.
 
-        def work():
+        Simulated time stays paused. Each controller sees only its own frozen view through its
+        own gateway, so no seat can inspect another's uncommitted actions. The order in which
+        controllers finish is recorded as `arrival_rank` for evidence; the batch order is always
+        ascending seat order and does not depend on it.
+        """
+        gateways = {seat: PlayerGateway(self, seat, decision_id, turn) for seat in self.seats}
+        holders = {seat: {} for seat in self.seats}
+        started = time.monotonic()
+
+        def work(seat):
+            holder = holders[seat]
             try:
-                holder["actions"] = controller.decide(gateway)
+                holder["actions"] = self.controllers[seat].decide(gateways[seat])
             except BaseException as exc:  # noqa: BLE001
                 holder["error"] = exc
+            holder["finished"] = time.monotonic()
 
-        started = time.monotonic()
-        thread = threading.Thread(target=work, daemon=True)
-        thread.start()
-        thread.join(self.options.decision_deadline_s)
-        elapsed = round(time.monotonic() - started, 6)
-        if thread.is_alive():
-            return [], "timeout", elapsed, None, {}
+        threads = {
+            seat: threading.Thread(target=work, args=(seat,), daemon=True) for seat in self.seats
+        }
+        for thread in threads.values():
+            thread.start()
+        deadline = started + self.options.decision_deadline_s
+        for thread in threads.values():
+            thread.join(max(0.0, deadline - time.monotonic()))
+        timed_out = {
+            seat
+            for seat, thread in threads.items()
+            if thread.is_alive() or holders[seat]["finished"] > deadline
+        }
+        order = sorted(
+            (holders[seat]["finished"], seat) for seat in self.seats if seat not in timed_out
+        )
+        ranks = {seat: rank for rank, (_, seat) in enumerate(order, start=1)}
+        collected = {}
+        for seat in self.seats:
+            gateway = gateways[seat]
+            if seat in timed_out:
+                elapsed = round(time.monotonic() - started, 6)
+                collected[seat] = ([], "timeout", elapsed, None, {}, None, gateway)
+                continue
+            elapsed = round(holders[seat]["finished"] - started, 6)
+            actions, outcome, error_text, metadata = self._interpret(holders[seat])
+            collected[seat] = (
+                actions,
+                outcome,
+                elapsed,
+                error_text,
+                metadata,
+                ranks[seat],
+                gateway,
+            )
+        return collected
+
+    @staticmethod
+    def _interpret(holder):
         if "error" in holder:
             failure = holder["error"]
             if isinstance(failure, EngineError):
                 raise failure
             if isinstance(failure, AgentStop):
-                return [], "agent_stop", elapsed, failure.reason, {"stop_kind": failure.kind}
+                return [], "agent_stop", failure.reason, {"stop_kind": failure.kind}
             if isinstance(failure, ProviderFailure):
-                return [], "provider_failure", elapsed, json.dumps(failure.detail)[:500], {}
-            return [], "controller_error", elapsed, repr(failure)[:500], {}
+                return [], "provider_failure", json.dumps(failure.detail)[:500], {}
+            return [], "controller_error", repr(failure)[:500], {}
         actions = holder.get("actions")
         metadata = {}
         if isinstance(actions, DecisionResult):
             metadata = actions.metadata
             actions = actions.actions
         if not isinstance(actions, list) or not all(isinstance(a, dict) for a in actions):
-            return [], "malformed", elapsed, None, metadata
-        return actions, "submitted", elapsed, None, metadata
+            return [], "malformed", None, metadata
+        return actions, "submitted", None, metadata
 
     def _decide_and_advance(self):
         decision_id = self.data["next_decision_id"]
         turn = self.turn
+        collected = self._collect_all(decision_id, turn)
         batches = []
-        for seat in self.seats:
-            gateway = PlayerGateway(self, seat, decision_id, turn)
-            actions, outcome, elapsed, error_text, metadata = self._collect(
-                self.controllers[seat], gateway
-            )
+        for seat in sorted(self.seats):  # The recorded rule: batches enter in seat order.
+            actions, outcome, elapsed, error_text, metadata, rank, gateway = collected[seat]
             # Provider outages are infrastructure: they neither count toward a forfeit nor
             # reset the streak. Budget stops end participation immediately.
             if outcome not in ("provider_failure", "agent_stop"):
@@ -421,10 +462,20 @@ class Episode:
             if self.administrative[seat]:
                 actions = []
             elif outcome == "agent_stop":
-                self.administrative[seat] = metadata.get("stop_kind", "agent_stop")
+                self.administrative[seat] = {
+                    "kind": metadata.get("stop_kind", "agent_stop"),
+                    "turn": turn,
+                    "decision_id": decision_id,
+                    "reason": error_text,
+                }
                 actions = [{"action_id": "agent-stop", "type": "resign"}]
             elif self.failures[seat] >= self.options.max_consecutive_failures:
-                self.administrative[seat] = "forfeit"
+                self.administrative[seat] = {
+                    "kind": "forfeit",
+                    "turn": turn,
+                    "decision_id": decision_id,
+                    "reason": error_text,
+                }
                 outcome = "forfeit"
                 actions = [{"action_id": "forfeit", "type": "resign"}]
             self.artifacts.append(
@@ -436,13 +487,14 @@ class Episode:
                     "observation_id": self.views[seat]["observation_id"],
                     "deadline_s": self.options.decision_deadline_s,
                     "elapsed_s": elapsed,
+                    "arrival_rank": rank,
                     "outcome": outcome,
                     "error": error_text,
                     "action_count": len(actions),
                     "reads_used": gateway.reads,
                     "read_budget": gateway.read_budget,
                     "consecutive_failures": self.failures[seat],
-                    "administrative": self.administrative[seat],
+                    "administrative": (self.administrative[seat] or {}).get("kind"),
                     "metadata": metadata,
                 },
             )

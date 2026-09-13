@@ -65,6 +65,9 @@ class ProviderRequest:
     temperature: float | None = 0.0
     effort: str | None = None
     thinking: str | None = None
+    # When set, the provider must make the model call this tool (the last request of a
+    # decision is restricted to submit_actions).
+    force_tool: str | None = None
     metadata: dict = field(default_factory=dict)
 
     def neutral(self):
@@ -78,6 +81,7 @@ class ProviderRequest:
             "temperature": self.temperature,
             "effort": self.effort,
             "thinking": self.thinking,
+            "force_tool": self.force_tool,
         }
 
 
@@ -186,18 +190,21 @@ class AnthropicProvider:
                     )
                 wire.append({"role": "assistant", "content": content})
             elif message["role"] == "tool":
+                content = [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": r["id"],
+                        "content": r["content"],
+                        "is_error": bool(r.get("is_error")),
+                    }
+                    for r in message["results"]
+                ]
+                if message.get("note"):
+                    content.append({"type": "text", "text": message["note"]})
                 wire.append(
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": r["id"],
-                                "content": r["content"],
-                                "is_error": bool(r.get("is_error")),
-                            }
-                            for r in message["results"]
-                        ],
+                        "content": content,
                     }
                 )
         return wire
@@ -217,7 +224,9 @@ class AnthropicProvider:
                 }
                 for t in req.tools
             ],
-            "tool_choice": {"type": "auto"},
+            "tool_choice": {"type": "tool", "name": req.force_tool}
+            if req.force_tool
+            else {"type": "auto"},
         }
         # Current Claude models accept no sampling parameters; determinism is not offered and
         # the recorded request states temperature as not applicable.
@@ -321,6 +330,8 @@ class OpenAICompatibleProvider:
             elif message["role"] == "tool":
                 for r in message["results"]:
                     wire.append({"role": "tool", "tool_call_id": r["id"], "content": r["content"]})
+                if message.get("note"):
+                    wire.append({"role": "user", "content": message["note"]})
         return wire
 
     def wire_tools(self, req):
@@ -337,12 +348,18 @@ class OpenAICompatibleProvider:
             for t in req.tools
         ]
 
+    @staticmethod
+    def wire_tool_choice(req):
+        if req.force_tool:
+            return {"type": "function", "function": {"name": req.force_tool}}
+        return "auto"
+
     def wire_request(self, req):
         body = {
             "model": self.model,
             "messages": self.wire_messages(req.system, req.messages),
             "tools": self.wire_tools(req),
-            "tool_choice": "auto",
+            "tool_choice": self.wire_tool_choice(req),
             "max_completion_tokens": req.max_output_tokens,
         }
         if req.temperature is not None:
@@ -478,7 +495,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
             "model": self.model,
             "messages": self.wire_messages(req.system, req.messages),
             "tools": self.wire_tools(req),
-            "tool_choice": "auto",
+            "tool_choice": self.wire_tool_choice(req),
             "max_tokens": req.max_output_tokens,
         }
         if req.temperature is not None:
@@ -491,7 +508,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         return body
 
 
-def render_transcript(messages):
+def render_transcript(messages, force_tool=None):
     """Render neutral messages as one prompt for single-shot, tool-less backends."""
     parts = []
     for message in messages:
@@ -506,7 +523,15 @@ def render_transcript(messages):
             for result in message["results"]:
                 label = "error" if result.get("is_error") else "result"
                 parts.append(f"### Tool {label} ({result['name']})\n{result['content']}")
-    parts.append("### Assistant\nReply with exactly one JSON object for your next tool call.")
+            if message.get("note"):
+                parts.append("### User\n" + message["note"])
+    if force_tool:
+        parts.append(
+            f"### Assistant\nReply with exactly one JSON object calling the tool {force_tool}; "
+            "no other tool is accepted for this request."
+        )
+    else:
+        parts.append("### Assistant\nReply with exactly one JSON object for your next tool call.")
     return "\n\n".join(parts)
 
 
@@ -546,7 +571,7 @@ class CommandProvider:
         self.workdir.mkdir(parents=True, exist_ok=True)
 
     def complete(self, req):
-        prompt = render_transcript(req.messages)
+        prompt = render_transcript(req.messages, req.force_tool)
         if self.system_in_prompt:
             prompt = "### System\n" + req.system + "\n\n" + prompt
         last_message = self.workdir / f"last-message-{secrets.token_hex(4)}.txt"

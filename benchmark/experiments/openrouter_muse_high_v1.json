@@ -1,0 +1,39 @@
+{
+	"schema_version": 1,
+	"id": "openrouter_muse_high_v1",
+	"description": "Development model at high reasoning effort for full-length games and matches through OpenRouter: Meta Muse Spark 1.3 Contributor (0.10/0.20 USD per million tokens on 2026-09-12), ceilings sized for 240 decisions with reasoning. Not the scored configuration.",
+	"provider": {
+		"kind": "openrouter",
+		"model": "meta/muse-spark-1.3-contributor",
+		"api_key_env": "OPENROUTER_API_KEY",
+		"base_url": "https://openrouter.ai/api/v1",
+		"reasoning_effort": "high",
+		"app_title": "0ad-agent-benchmark",
+		"app_url": null,
+		"provider_routing": null,
+		"timeout_s": 240
+	},
+	"sampling": {
+		"temperature": 0.0
+	},
+	"budgets": {
+		"model_requests_per_decision": 4,
+		"output_tokens_per_decision": 12000,
+		"episode_tokens": 16000000,
+		"episode_cost_usd": 3.0
+	},
+	"pricing_usd_per_million": {
+		"input": 0.1,
+		"output": 0.2,
+		"cache_read": null,
+		"cache_write": null
+	},
+	"notes": {
+		"max_chars": 4000
+	},
+	"tool_result_max_chars": 24000,
+	"retry": {
+		"max_attempts": 3,
+		"backoff_s": 2.0
+	}
+}

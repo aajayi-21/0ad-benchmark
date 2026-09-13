@@ -124,6 +124,10 @@ class Scenario:
             players.append(player)
         settings = {
             "mapType": self.map_type,
+            # Display settings the graphical client reads during a visual replay; the engine
+            # applies the per-player population cap whether or not its type is named.
+            "mapName": Path(self.map).name.replace("_", " ").title(),
+            "PopulationCapType": "player",
             "Seed": self.seeds["map"],
             "AISeed": self.seeds["ai"],
             "CheatsEnabled": False,

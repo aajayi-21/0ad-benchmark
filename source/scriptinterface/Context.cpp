@@ -29,6 +29,7 @@
 #include "scriptinterface/ModuleLoader.h"
 #include "scriptinterface/Promises.h"
 #include "scriptinterface/Engine.h"
+#include "scriptinterface/ExtraRoots.h"
 
 #include <js/Context.h>
 #include <js/GCAPI.h>
@@ -38,6 +39,12 @@
 #include <js/Stack.h>
 #include <jsapi.h>
 #include <jsfriendapi.h>
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace JS { class Realm; }
 struct JSContext;
@@ -104,6 +111,81 @@ void GCSliceCallbackHook(JSContext*, JS::GCProgress progress, const JS::GCDescri
 
 namespace Script
 {
+namespace
+{
+/**
+ * Extra GC roots registered through Script::AddExtraGCRootsTracer, one registry per JSContext.
+ *
+ * SpiderMonkey 128 (before the fix for Mozilla bug 1982134) implements
+ * JS_RemoveExtraGCRootsTracer by erasing the first tracer with the same callback and ignores
+ * the data pointer, so several registrations sharing one callback (every GUI object registers
+ * IGUIObject::Trace with itself as data) cannot be removed individually: a destroyed object's
+ * tracer survives and dereferences freed memory at the next collection while a live object's
+ * tracer is dropped instead. The engine therefore registers exactly one tracer per context with
+ * a callback nobody else uses, and keeps the (callback, data) pairs itself.
+ */
+struct ExtraGCRoots
+{
+	std::vector<std::pair<JSTraceDataOp, void*>> roots;
+};
+
+std::mutex g_ExtraGCRootsMutex;
+std::unordered_map<JSContext*, std::unique_ptr<ExtraGCRoots>> g_ExtraGCRoots;
+
+void TraceExtraGCRoots(JSTracer* trc, void* data)
+{
+	// Tracing runs on the thread owning the context and never concurrently with changes to
+	// the same registry, so the vector is read without the mutex.
+	for (const auto& [op, rootData] : static_cast<ExtraGCRoots*>(data)->roots)
+		op(trc, rootData);
+}
+
+ExtraGCRoots& RegistryFor(JSContext* cx)
+{
+	const auto it = g_ExtraGCRoots.find(cx);
+	ENSURE(it != g_ExtraGCRoots.end() && "Extra GC roots used on a context without a registry");
+	return *it->second;
+}
+} // anonymous namespace
+
+void InitExtraGCRoots(JSContext* cx)
+{
+	std::lock_guard<std::mutex> lock{g_ExtraGCRootsMutex};
+	ENSURE(g_ExtraGCRoots.find(cx) == g_ExtraGCRoots.end());
+	auto registry = std::make_unique<ExtraGCRoots>();
+	ENSURE(JS_AddExtraGCRootsTracer(cx, TraceExtraGCRoots, registry.get()));
+	g_ExtraGCRoots.emplace(cx, std::move(registry));
+}
+
+void ShutdownExtraGCRoots(JSContext* cx)
+{
+	std::lock_guard<std::mutex> lock{g_ExtraGCRootsMutex};
+	const auto it = g_ExtraGCRoots.find(cx);
+	ENSURE(it != g_ExtraGCRoots.end());
+	// The only tracer with this callback on the runtime, so the library finds the right one.
+	JS_RemoveExtraGCRootsTracer(cx, TraceExtraGCRoots, it->second.get());
+	g_ExtraGCRoots.erase(it);
+}
+
+void AddExtraGCRootsTracer(JSContext* cx, JSTraceDataOp op, void* data)
+{
+	std::lock_guard<std::mutex> lock{g_ExtraGCRootsMutex};
+	RegistryFor(cx).roots.emplace_back(op, data);
+}
+
+void RemoveExtraGCRootsTracer(JSContext* cx, JSTraceDataOp op, void* data)
+{
+	std::lock_guard<std::mutex> lock{g_ExtraGCRootsMutex};
+	std::vector<std::pair<JSTraceDataOp, void*>>& roots = RegistryFor(cx).roots;
+	const auto it = std::find(roots.begin(), roots.end(), std::pair<JSTraceDataOp, void*>{op, data});
+	if (it == roots.end())
+	{
+		debug_warn(L"RemoveExtraGCRootsTracer: no such tracer registered");
+		return;
+	}
+	roots.erase(it);
+}
+
 
 Context::Context(int contextSize, uint32_t heapGrowthBytesGCTrigger):
 	m_JobQueue{std::make_unique<JobQueue>()},
@@ -114,6 +196,7 @@ Context::Context(int contextSize, uint32_t heapGrowthBytesGCTrigger):
 
 	m_cx = JS_NewContext(contextSize);
 	ENSURE(m_cx); // TODO: error handling
+	InitExtraGCRoots(m_cx);
 
 	// Set stack quota limits - JS scripts will stop with a "too much recursion" exception.
 	// This seems to refer to the program's actual stack size, so it should be lower than the lowest common denominator
@@ -182,6 +265,7 @@ Context::~Context()
 	// Switch back to normal performance mode to avoid assertion in debug mode.
 	js::gc::SetPerformanceHint(m_cx, js::gc::PerformanceHint::Normal);
 
+	ShutdownExtraGCRoots(m_cx);
 	JS_DestroyContext(m_cx);
 	Engine::GetSingleton().UnRegisterContext(m_cx);
 }

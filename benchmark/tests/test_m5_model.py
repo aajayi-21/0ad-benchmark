@@ -35,6 +35,7 @@ from zero_ad_bench.providers import (  # noqa: E402
     OpenRouterProvider,
     ProviderError,
     ProviderRequest,
+    render_transcript,
     tool_schema_hash,
 )
 from zero_ad_bench.scenario import Scenario  # noqa: E402
@@ -352,6 +353,73 @@ class TestM5Model(unittest.TestCase):
             for name in ("decisions", "model-calls", "actions", "hashes")
         }
 
+    def test_last_request_is_forced_to_submit(self):
+        """Scaffold 3: reads are announced against the budget and the last request must submit."""
+        notices = []
+
+        def read_until_forced(req, policy):
+            if req.force_tool == "submit_actions":
+                notices.append(req.messages[-1]["note"])
+                return policy.calls([("submit_actions", {"actions": [], "plan": "forced"})])
+            return policy.call(
+                "inspect_section", {"section": "own_entities", "cursor": None, "limit": 8}
+            )
+
+        controller = ModelController(
+            MockProvider(HeuristicPolicy(overrides={1: read_until_forced})), EXPERIMENT
+        )
+        episode, result, _ = self.run_episode(controller, "forced")
+        self.assertEqual(result["status"], "completed", result)
+        streams = self.streams(episode)
+        by_decision = {d["decision_id"]: d for d in streams["decisions"]}
+        self.assertEqual(by_decision[1]["metadata"]["reason"], "submitted")
+        self.assertEqual(
+            by_decision[1]["metadata"]["model_requests"],
+            EXPERIMENT["budgets"]["model_requests_per_decision"],
+        )
+        self.assertEqual(by_decision[1]["metadata"]["plan"], "forced")
+        calls = [
+            c for c in streams["model-calls"] if c["kind"] == "model" and c["decision_id"] == 1
+        ]
+        self.assertEqual(
+            [c["request"]["force_tool"] for c in calls], [None, None, None, "submit_actions"]
+        )
+        self.assertEqual(
+            calls[1]["request"]["messages"][-1]["note"], "3 model requests left this decision."
+        )
+        self.assertIn(
+            "1 model request left this decision: it must call submit_actions", notices[0]
+        )
+        self.assertTrue(
+            all(json.loads(r["content"]) for r in calls[1]["request"]["messages"][-1]["results"]),
+            "tool results stay valid JSON",
+        )
+        self.assertEqual(by_decision[1]["metadata"]["scaffold_version"], "3")
+        # Every adapter turns the forced tool into its provider's tool choice.
+        request = ProviderRequest(
+            model="m",
+            system="s",
+            messages=[{"role": "user", "content": "x"}],
+            tools=TOOLS,
+            max_output_tokens=100,
+            force_tool="submit_actions",
+        )
+        anthropic = AnthropicProvider("claude-x", api_key="test", base_url="http://127.0.0.1:9")
+        self.assertEqual(
+            anthropic.wire_request(request)["tool_choice"],
+            {"type": "tool", "name": "submit_actions"},
+        )
+        openrouter = OpenRouterProvider("m", api_key="test")
+        self.assertEqual(
+            openrouter.wire_request(request)["tool_choice"],
+            {"type": "function", "function": {"name": "submit_actions"}},
+        )
+        self.assertIn(
+            "calling the tool submit_actions",
+            render_transcript(request.messages, "submit_actions"),
+        )
+        self.assertEqual(request.neutral()["force_tool"], "submit_actions")
+
     def test_mock_model_completes_episode_with_exact_logging(self):
         controller = ModelController(MockProvider(HeuristicPolicy()), EXPERIMENT)
         episode, result, engine = self.run_episode(controller, "mock")
@@ -390,7 +458,7 @@ class TestM5Model(unittest.TestCase):
             all(c["response"]["omitted_count"] == 0 for c in automatic),
             automatic[0]["response"]["omitted_count"],
         )
-        self.assertEqual(automatic[0]["request"]["limit"], 64)
+        self.assertEqual(automatic[0]["request"]["limit"], 256)
         self.assertEqual([c["request"]["kind"] for c in charged], ["entities"])
         # Nothing privileged reaches the model: scan every request that was sent.
         forbidden = [
