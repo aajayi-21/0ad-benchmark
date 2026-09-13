@@ -8,7 +8,7 @@
 		"model_requests_per_decision": 4,
 		"output_tokens_per_decision": 8000,
 		"episode_tokens": 2000000,
-		"episode_cost_usd": null
+		"episode_cost_usd": 10.0
 	},
 	"pricing_usd_per_million": {"input": 1.0, "output": 5.0, "cache_read": 0.1, "cache_write": 1.25},
 	"notes": {"max_chars": 4000},

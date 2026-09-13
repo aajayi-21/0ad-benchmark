@@ -174,7 +174,9 @@ def _own(view, suffix=None, cls=None):
     ]
 
 
-def _known(view, owner=None, cls=None, suffix=None, resource=None, visible_only=False):
+def _known(
+    view, owner=None, cls=None, suffix=None, resource=None, visible_only=False, enemy=False
+):
     """Visible and remembered entities filtered by owner, class, template, or resource type."""
     pool = list(view["visible_entities"]) + ([] if visible_only else list(view["last_seen"]))
     result = []
@@ -182,6 +184,10 @@ def _known(view, owner=None, cls=None, suffix=None, resource=None, visible_only=
         if e.get("status") in ("destroyed", "not_present_at_last_position"):
             continue
         if owner is not None and e.get("owner") != owner:
+            continue
+        if enemy and (
+            e.get("owner") in (None, 0, view["seat"]) or view["self"]["diplomacy"][e["owner"]] >= 0
+        ):
             continue
         if cls is not None and cls not in e.get("classes", []):
             continue
@@ -358,7 +364,7 @@ class DefenseController:
             return actions
         enemies = [
             e
-            for e in _known(view, owner=2, cls="Unit", visible_only=True)
+            for e in _known(view, enemy=True, cls="Unit", visible_only=True)
             if _distance(e["position"], centre["position"]) < 160
         ]
         if enemies:
@@ -587,8 +593,8 @@ class ScoutStrikeController:
         soldiers = [e for e in _own(view, cls="Infantry") if e["position"]]
         if centre is None:
             return actions
-        targets = _known(view, owner=2, cls="Unit")
-        visible = _known(view, owner=2, cls="Unit", visible_only=True)
+        targets = _known(view, enemy=True, cls="Unit")
+        visible = _known(view, enemy=True, cls="Unit", visible_only=True)
         if visible and soldiers:
             actions.append(
                 {
@@ -652,7 +658,7 @@ class RandomLegalController:
         producers = [e for e in own if e["trainable"] or e["researchable"]]
         builders = [e for e in units if e["buildable"]]
         resources = _known(view, resource="wood") + _known(view, resource="food")
-        enemies = _known(view, owner=2, visible_only=True)
+        enemies = _known(view, enemy=True, visible_only=True)
         bounds = view["map"]["bounds"]
         for index in range(self.per_decision):
             kind = self.random.choice(["move", "gather", "train", "build", "attack", "research"])

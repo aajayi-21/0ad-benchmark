@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from zero_ad_bench import ARTIFACT_SCHEMA_VERSION, PACKAGE_VERSION, evaluation
+from zero_ad_bench.providers import total_usage_tokens
 from zero_ad_bench.telemetry import STREAMS, read_jsonl, sha256_file
 
 
@@ -149,9 +150,33 @@ def build_result(directory, override=None):
     }
 
 
+def provider_attempts(calls):
+    """Include dispatched requests without a terminal record as unknown infrastructure costs."""
+    completed = [c for c in calls if c.get("kind") == "model"]
+    fields = ("seat", "decision_id", "request_index", "attempt")
+    finished = {tuple(c.get(k) for k in fields) for c in completed}
+    for call in calls:
+        if (
+            call.get("kind") != "model_request_started"
+            or tuple(call.get(k) for k in fields) in finished
+        ):
+            continue
+        completed.append(
+            {
+                **call,
+                "kind": "model",
+                "response": None,
+                "usage": None,
+                "cost_usd": None,
+                "error": {"kind": "interrupted_request", "message": "Request outcome is unknown"},
+            }
+        )
+    return completed
+
+
 def model_usage(calls, decisions):
     """Aggregate provider accounting; counts a provider did not report stay unavailable."""
-    model_calls = [c for c in calls if c.get("kind") == "model"]
+    model_calls = provider_attempts(calls)
     if not model_calls:
         return None
     usage = {
@@ -164,6 +189,8 @@ def model_usage(calls, decisions):
         "cache_read_input_tokens": 0,
         "cost_usd": 0.0,
         "cost_unavailable": False,
+        "budget_tokens": 0,
+        "budget_cost_usd": 0.0,
         "latency_s_total": 0.0,
         "usage_unavailable_responses": 0,
         "models": {},
@@ -178,8 +205,20 @@ def model_usage(calls, decisions):
             usage["retries"] += 1
         seen.add(key)
         usage["latency_s_total"] += call.get("latency_s") or 0
+        reservation = call.get("reservation") or {}
+        token_count = total_usage_tokens(call.get("usage") or {})
+        usage["budget_tokens"] += (
+            token_count if token_count is not None else reservation.get("tokens", 0)
+        )
+        usage["budget_cost_usd"] += (
+            call["cost_usd"]
+            if call.get("cost_usd") is not None
+            else reservation.get("cost_usd", 0)
+        )
         if call.get("error"):
             usage["errors"] += 1
+            if call.get("cost_usd") is None:
+                usage["cost_unavailable"] = True
             kind = call["error"].get("kind", "unknown")
             usage["error_kinds"][kind] = usage["error_kinds"].get(kind, 0) + 1
             continue
@@ -284,7 +323,7 @@ def build_report(directory, result=None):
     )
     for action in streams["actions"]:
         if action["kind"] == "result":
-            bucket = by_decision[action["decision_id"]]
+            bucket = by_decision[action["decision_id"], action["seat"]]
             bucket["submitted"] += 1
             bucket[action["stage"]] = bucket.get(action["stage"], 0) + 1
             if action.get("partial"):
@@ -292,7 +331,7 @@ def build_report(directory, result=None):
     decisions = streams["decisions"]
     rows = []
     for decision in decisions:
-        bucket = by_decision[decision["decision_id"]]
+        bucket = by_decision[decision["decision_id"], decision["seat"]]
         rows.append(
             [
                 decision["decision_id"],

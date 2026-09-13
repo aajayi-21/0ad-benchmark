@@ -171,6 +171,19 @@ def check(args):
     return 0 if outcome.get("model_found", True) and outcome.get("executable", True) else 1
 
 
+def experiment_options(args):
+    budget = None
+    if args.experiment_token_budget is not None or args.experiment_cost_budget is not None:
+        budget = {"tokens": args.experiment_token_budget, "cost_usd": args.experiment_cost_budget}
+    return {
+        "decision_deadline_s": args.decision_deadline,
+        "process_deadline_s": args.process_deadline,
+        "max_attempts": args.max_attempts,
+        "experiment_budget": budget,
+        "turn_limit_override": getattr(args, "turn_limit", None),
+    }
+
+
 def run_experiment(args):
     config = (
         json.loads(Path(args.experiment_config).read_text()) if args.experiment_config else None
@@ -183,7 +196,9 @@ def run_experiment(args):
         trials_per_seed=args.trials,
         scenario_ids=args.scenarios.split(",") if args.scenarios else None,
         engine=args.engine,
-        options={"decision_deadline_s": args.decision_deadline},
+        options=experiment_options(args),
+        mod_sources={name: Path(path) for name, path in _pairs(args.mod_source).items()},
+        seed_file=args.seed_file,
     )
     rows, _summary = experiments.run_plan(
         plan,
@@ -221,10 +236,9 @@ def run_compete(args):
         trials_per_pair=args.trials,
         scenario_ids=args.scenarios.split(",") if args.scenarios else None,
         engine=args.engine,
-        options={
-            "decision_deadline_s": args.decision_deadline,
-            "turn_limit_override": args.turn_limit,
-        },
+        options=experiment_options(args),
+        mod_sources={name: Path(path) for name, path in _pairs(args.mod_source).items()},
+        seed_file=args.seed_file,
     )
     rows, summary = competition.run_match_plan(
         plan,
@@ -316,6 +330,18 @@ def main(argv=None):
     trial.add_argument("--engine", default=str(DEFAULT_ENGINE))
     trial.add_argument("--decision-deadline", type=float, default=30.0)
     trial.add_argument("--process-deadline", type=float, default=1800.0)
+    trial.add_argument(
+        "--seed-file", help="operator-only JSON seed list matching the private commitment"
+    )
+    trial.add_argument(
+        "--max-attempts", type=int, default=2, help="bounded attempts per scheduled trial"
+    )
+    trial.add_argument(
+        "--experiment-token-budget", type=int, help="required total token ceiling for paid batches"
+    )
+    trial.add_argument(
+        "--experiment-cost-budget", type=float, help="required total USD ceiling for paid batches"
+    )
     trial.set_defaults(handler=run_experiment)
     match = commands.add_parser(
         "compete", help="play a preregistered set of two-seat matches between agents"
@@ -340,6 +366,18 @@ def main(argv=None):
     match.add_argument("--engine", default=str(DEFAULT_ENGINE))
     match.add_argument("--decision-deadline", type=float, default=30.0)
     match.add_argument("--process-deadline", type=float, default=1800.0)
+    match.add_argument(
+        "--seed-file", help="operator-only JSON seed list matching the private commitment"
+    )
+    match.add_argument(
+        "--max-attempts", type=int, default=2, help="bounded attempts per scheduled trial"
+    )
+    match.add_argument(
+        "--experiment-token-budget", type=int, help="required total token ceiling for paid batches"
+    )
+    match.add_argument(
+        "--experiment-cost-budget", type=float, help="required total USD ceiling for paid batches"
+    )
     match.set_defaults(handler=run_compete)
     view = commands.add_parser(
         "replay-view", help="prepare an episode's replay for the graphical client"

@@ -1,7 +1,8 @@
 {
 	"schema_version": 1,
 	"id": "competition_v1",
-	"frozen": "2026-09-12",
+	"frozen": "2026-09-13",
+	"revision": 2,
 	"description": "Two-seat matches between external agents on the frozen match scenario: mirror matches first, every cross matchup played twice per seed with seats swapped.",
 	"scenarios": [
 		"match_conquest_v1"
@@ -56,11 +57,11 @@
 	"versions": {
 		"protocol": "1.3",
 		"observation_schema": "1.0",
-		"artifact_schema": "1.0",
-		"scaffold": "3",
+		"artifact_schema": "1.1",
+		"scaffold": "4",
 		"evaluator": "1",
 		"mods": {
-			"agent_benchmark": "0.4.2"
+			"agent_benchmark": "0.4.3"
 		}
 	}
 }

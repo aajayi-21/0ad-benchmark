@@ -7,10 +7,19 @@ is one episode of the ordinary multi-seat scheduler with a separate controller i
 seat, so a mirror match runs a participant against a fresh copy of itself.
 """
 
+import copy
 import json
 from pathlib import Path
 
-from zero_ad_bench import ARTIFACT_SCHEMA_VERSION, PACKAGE_VERSION, PROTOCOL_VERSION, analysis
+from zero_ad_bench import (
+    ARTIFACT_SCHEMA_VERSION,
+    PACKAGE_VERSION,
+    PROTOCOL_VERSION,
+    analysis,
+    planning,
+    provenance,
+    report,
+)
 from zero_ad_bench.agents import make_controller
 from zero_ad_bench.engine import DEFAULT_ENGINE, EngineError, EngineProcess
 from zero_ad_bench.environment import Episode, RunOptions
@@ -53,11 +62,12 @@ def participant_summary(participant):
     entry = dict(participant)
     if participant.get("config"):
         entry["config_sha256"] = sha256_file(participant["config"])
-        entry["config_id"] = json.loads(Path(participant["config"]).read_text()).get("id")
+        entry["resolved_config"] = json.loads(Path(participant["config"]).read_text())
+        entry["config_id"] = entry["resolved_config"].get("id")
     return entry
 
 
-def build_match_plan(
+def build_match_plan(  # noqa: PLR0913 - explicit operator inputs are pinned independently
     competition_path,
     split,
     participants,
@@ -67,13 +77,23 @@ def build_match_plan(
     scenario_ids=None,
     engine=DEFAULT_ENGINE,
     options=None,
+    mod_sources=None,
+    seed_file=None,
 ):
     """Build the match preregistration: everything that determines the schedule, hashed first."""
     competition, scenarios, path = load_suite(competition_path)
-    seeds = competition["seed_splits"][split]
-    if isinstance(seeds, dict):
-        message = f"Split {split!r} is not held in the repository; supply its seed file"
-        raise TypeError(message)
+    seeds = planning.seeds_for_split(competition, split, seed_file)
+    runtime = planning.runtime_options(options, engine=engine, mod_sources=mod_sources)
+    if split != "development" and runtime["turn_limit_override"] is not None:
+        raise ValueError("Scored runs cannot override the registered horizon")
+    resolved_participants = {name: participant_summary(p) for name, p in participants.items()}
+    configs = [
+        p["resolved_config"] for p in resolved_participants.values() if p["controller"] == "model"
+    ]
+    planning.episode_reservation(configs)
+    planning.validate_experiment_budget(
+        runtime["experiment_budget"], paid=any(c["provider"]["kind"] != "mock" for c in configs)
+    )
     pairing = competition.get("pairing", {})
     trials = trials_per_pair or int(pairing.get("trials_per_pair", 1))
     swap = bool(pairing.get("swap_seats", True))
@@ -109,7 +129,6 @@ def build_match_plan(
                                 "participants": {"1": seat_one, "2": seat_two},
                             }
                         )
-    root = path.resolve().parents[1]
     plan = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "preregistered_utc": utc_now(),
@@ -125,12 +144,13 @@ def build_match_plan(
                 "schedule": scenarios[s].describe()["schedule"],
                 "objective": scenarios[s].describe()["objective"],
                 "family": scenarios[s].family,
+                "resolved": scenarios[s].describe(),
             }
             for s in chosen
         },
         "split": split,
         "seeds": seeds,
-        "participants": {name: participant_summary(p) for name, p in participants.items()},
+        "participants": resolved_participants,
         "matchups": [f"{a}-vs-{b}" for a, b in ordered],
         "pairing": {**pairing, "trials_per_pair": trials, "swap_seats": swap},
         "scheduling": competition.get("scheduling", {}),
@@ -138,14 +158,18 @@ def build_match_plan(
         "result_rules": competition.get("result_rules", {}),
         "match_count": len(matches),
         "matches": matches,
-        "options": options or {},
+        "options": runtime,
+        "inputs": provenance.capture(
+            list(dict.fromkeys(m for s in chosen for m in scenarios[s].mods)), mod_sources, engine
+        ),
         "versions": {
             **competition.get("versions", {}),
             "runner": PACKAGE_VERSION,
             "protocol": PROTOCOL_VERSION,
             "scaffold": SCAFFOLD_VERSION,
             "engine_binary_sha256": sha256_file(engine) if Path(engine).is_file() else None,
-            "git_commit": git_commit(root),
+            "git_commit": git_commit(provenance.ROOT),
+            "runtime": provenance.runtime_versions(),
         },
         "analysis": competition.get("analysis", {}),
         "exclusion_rules": (
@@ -159,7 +183,9 @@ def build_match_plan(
 def make_participant_controller(participant, scenario, seed):
     spec = participant["controller"]
     if spec == "model":
-        config = json.loads(Path(participant["config"]).read_text())
+        config = copy.deepcopy(participant.get("resolved_config"))
+        if config is None:
+            config = json.loads(Path(participant["config"]).read_text())
         return ModelController(make_provider(config["provider"]), config)
     if spec == "scripted":
         spec = scenario.baseline
@@ -171,6 +197,7 @@ def make_participant_controller(participant, scenario, seed):
 def seat_costs(directory, seats):
     """Provider-reported cost per seat; None for a seat whose provider reported none."""
     calls, _ = read_jsonl(directory / "model-calls.jsonl")
+    calls = report.provider_attempts(calls)
     costs = {}
     for seat in seats:
         rows = [c for c in calls if c.get("kind") == "model" and c.get("seat") == seat]
@@ -201,16 +228,10 @@ def run_match(  # noqa: PLR0913 - one keyword per operator setting
         # Development runs only; the preregistration records the shortened horizon.
         scenario.turn_limit = int(turn_limit_override)
     seats = scenario.external_seats()
-    controllers = {
-        seat: make_participant_controller(
-            participants[match["participants"][str(seat)]], scenario, match["seed"]
-        )
-        for seat in seats
-    }
-    label = match["match_id"].replace("/", "_")
+    label = match.get("attempt_id") or match["match_id"].replace("/", "_")
     row = {
         **match,
-        "controllers": {str(seat): controllers[seat].name for seat in seats},
+        "controllers": {},
         "episode": None,
         "status": "failed",
         "result": "invalid",
@@ -222,7 +243,15 @@ def run_match(  # noqa: PLR0913 - one keyword per operator setting
         "failure": None,
     }
     process = None
+    episode = None
     try:
+        controllers = {
+            seat: make_participant_controller(
+                participants[match["participants"][str(seat)]], scenario, match["seed"]
+            )
+            for seat in seats
+        }
+        row["controllers"] = {str(seat): controllers[seat].name for seat in seats}
         process = EngineProcess(
             output_root / "engines" / label,
             engine=engine,
@@ -235,6 +264,7 @@ def run_match(  # noqa: PLR0913 - one keyword per operator setting
             decision_deadline_s=decision_deadline_s,
             experiment_id=f"{match['scenario']}:{match['matchup']}",
             label=match["match_id"],
+            attempt_id=match.get("attempt_id"),
             turn_limit_override=turn_limit_override,
         )
         episode = Episode(
@@ -268,6 +298,16 @@ def run_match(  # noqa: PLR0913 - one keyword per operator setting
             "message": str(exc)[:500],
         }
     finally:
+        if episode is not None and episode.artifacts is not None:
+            row["episode"] = str(episode.artifacts.directory.relative_to(output_root))
+        result = episode.result if episode is not None else None
+        usage = (result or {}).get("model_usage") or {}
+        row["budget_consumed"] = {
+            "tokens": usage.get("budget_tokens", 0),
+            "cost_usd": usage.get("budget_cost_usd", 0),
+        }
+        if episode is not None and episode.result is None:
+            row["budget_consumed"] = match.get("reservation", row["budget_consumed"])
         if process is not None:
             process.close()
     return row
@@ -366,84 +406,78 @@ def summarize_matches(rows):
     return summary
 
 
-def run_match_plan(  # noqa: PLR0913 - one keyword per operator setting
+def run_match_plan(  # noqa: PLR0913 - explicit overrides must agree with the frozen plan
     plan,
     scenarios,
     participants,
     output_root,
     *,
-    engine=DEFAULT_ENGINE,
-    decision_deadline_s=30.0,
-    process_deadline_s=1800,
+    engine=None,
+    decision_deadline_s=None,
+    process_deadline_s=None,
     mod_sources=None,
     turn_limit_override=None,
     resume=True,
 ):
-    """Play every scheduled match, appending one accounting row per attempt as it finishes."""
-    output_root = Path(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    plan_path = output_root / "preregistration.json"
-    if plan_path.is_file():
-        existing = json.loads(plan_path.read_text())
-        if (
-            existing["matches"] != plan["matches"]
-            or existing["competition"]["sha256"] != plan["competition"]["sha256"]
-            or existing["participants"] != plan["participants"]
-        ):
-            raise ValueError(
-                "An earlier preregistration in this directory differs; use a new directory"
-            )
-    else:
-        write_json_atomic(plan_path, plan)
-    plan_hash = sha256_file(plan_path)
-    rows_path = output_root / "competition.jsonl"
-    done = {}
-    if resume and rows_path.is_file():
-        for line in rows_path.read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                done[row["match_id"]] = row
-    manifest = {
-        "schema_version": ARTIFACT_SCHEMA_VERSION,
-        "preregistration_sha256": plan_hash,
-        "status": "running",
-        "started_utc": utc_now(),
-        "finished_utc": None,
-    }
-    write_json_atomic(output_root / "competition-manifest.json", manifest)
-    rows = list(done.values())
-    with rows_path.open("a", encoding="utf-8") as handle:
-        for match in plan["matches"]:
-            if match["match_id"] in done:
-                continue
-            row = run_match(
-                match,
-                scenarios[match["scenario"]],
-                participants,
-                output_root,
-                engine=engine,
-                decision_deadline_s=decision_deadline_s,
-                process_deadline_s=process_deadline_s,
-                mod_sources=mod_sources,
-                turn_limit_override=turn_limit_override,
-            )
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-            handle.flush()
-            rows.append(row)
-    summary = summarize_matches(rows)
-    write_json_atomic(output_root / "competition-summary.json", summary)
-    (output_root / "competition-report.md").write_text(
-        render_match_report(plan, rows, summary, plan_hash)
-    )
-    manifest.update(
+    """Play the resolved matches with immutable inputs and durable bounded attempts."""
+    runtime = planning.validate_runtime(
+        plan,
         {
-            "status": "completed",
-            "finished_utc": utc_now(),
-            "rows": len(rows),
-            "accounting": summary["accounting"],
-        }
+            "engine": engine,
+            "decision_deadline_s": decision_deadline_s,
+            "process_deadline_s": process_deadline_s,
+            "mod_sources": mod_sources,
+            "turn_limit_override": turn_limit_override,
+        },
     )
-    write_json_atomic(output_root / "competition-manifest.json", manifest)
+    if {name: participant_summary(p) for name, p in participants.items()} != plan["participants"]:
+        raise ValueError("Participants differ from preregistration")
+    resolved = copy.deepcopy(plan["participants"])
+    output_root = Path(output_root)
+
+    def reserve(match):
+        return planning.episode_reservation(
+            [
+                resolved[name]["resolved_config"]
+                for name in match["participants"].values()
+                if resolved[name]["controller"] == "model"
+            ]
+        )
+
+    def execute(match):
+        return run_match(
+            match,
+            scenarios[match["scenario"]],
+            resolved,
+            output_root,
+            engine=runtime["engine"],
+            decision_deadline_s=runtime["decision_deadline_s"],
+            process_deadline_s=runtime["process_deadline_s"],
+            mod_sources=runtime["mod_sources"],
+            turn_limit_override=runtime["turn_limit_override"],
+        )
+
+    def finish(rows, plan_hash):
+        summary = summarize_matches(rows)
+        write_json_atomic(output_root / "competition-summary.json", summary)
+        (output_root / "competition-report.md").write_text(
+            render_match_report(plan, rows, summary, plan_hash)
+        )
+        return {"accounting": summary["accounting"]}
+
+    rows, _plan_hash = planning.execute_schedule(
+        plan,
+        scenarios,
+        output_root,
+        stream="competition",
+        key="match_id",
+        schedule=plan["matches"],
+        run_one=execute,
+        reserve=reserve,
+        resume=resume,
+        finish=finish,
+    )
+    summary = json.loads((output_root / "competition-summary.json").read_text())
     return rows, summary
 
 

@@ -355,11 +355,9 @@ class TestM5Model(unittest.TestCase):
 
     def test_last_request_is_forced_to_submit(self):
         """Scaffold 3: reads are announced against the budget and the last request must submit."""
-        notices = []
 
         def read_until_forced(req, policy):
             if req.force_tool == "submit_actions":
-                notices.append(req.messages[-1]["note"])
                 return policy.calls([("submit_actions", {"actions": [], "plan": "forced"})])
             return policy.call(
                 "inspect_section", {"section": "own_entities", "cursor": None, "limit": 8}
@@ -388,13 +386,14 @@ class TestM5Model(unittest.TestCase):
             calls[1]["request"]["messages"][-1]["note"], "3 model requests left this decision."
         )
         self.assertIn(
-            "1 model request left this decision: it must call submit_actions", notices[0]
+            "1 model request left this decision: it must call submit_actions",
+            calls[-1]["request"]["messages"][-1]["note"],
         )
         self.assertTrue(
             all(json.loads(r["content"]) for r in calls[1]["request"]["messages"][-1]["results"]),
             "tool results stay valid JSON",
         )
-        self.assertEqual(by_decision[1]["metadata"]["scaffold_version"], "3")
+        self.assertEqual(by_decision[1]["metadata"]["scaffold_version"], "4")
         # Every adapter turns the forced tool into its provider's tool choice.
         request = ProviderRequest(
             model="m",
@@ -560,7 +559,7 @@ class TestM5Model(unittest.TestCase):
             1: text_only,
             2: refusal,
             3: bad_then_good,
-            4: persistent_client_error,
+            7: persistent_client_error,
             5: read_forever,
             6: overspend_reads,
         }
@@ -568,7 +567,7 @@ class TestM5Model(unittest.TestCase):
             MockProvider(HeuristicPolicy(overrides=overrides)), EXPERIMENT
         )
         episode, result, _ = self.run_episode(controller, "faults")
-        self.assertEqual(result["status"], "invalid", result)
+        self.assertEqual(result["status"], "failed", result)
         self.assertEqual(result["invalid_reasons"][0]["reason"], "provider_failure")
         streams = self.streams(episode)
         by_decision = {d["decision_id"]: d for d in streams["decisions"]}
@@ -589,8 +588,8 @@ class TestM5Model(unittest.TestCase):
         self.assertEqual(by_decision[2]["metadata"]["reason"], "refusal")
         self.assertEqual(by_decision[3]["metadata"]["reason"], "submitted")
         self.assertEqual(by_decision[3]["metadata"]["model_requests"], 2)
-        self.assertEqual(by_decision[4]["outcome"], "provider_failure")
-        self.assertEqual(by_decision[4]["consecutive_failures"], 0)
+        self.assertEqual(by_decision[7]["outcome"], "provider_failure")
+        self.assertEqual(by_decision[7]["consecutive_failures"], 0)
         self.assertEqual(by_decision[5]["metadata"]["reason"], "request_budget_exhausted")
         self.assertEqual(
             by_decision[5]["metadata"]["model_requests"],
@@ -620,10 +619,12 @@ class TestM5Model(unittest.TestCase):
                 self.assertEqual(result["administrative"]["1"]["kind"], "budget_stop")
                 self.assertEqual(result["terminal_reason"], "game_end")
                 decisions = self.streams(episode)["decisions"]
-                self.assertEqual(decisions[0]["outcome"], "submitted")
-                self.assertEqual(decisions[1]["outcome"], "agent_stop")
-                self.assertIn("ceiling", decisions[1]["error"])
-                self.assertEqual(len(decisions), 2)
+                self.assertEqual(decisions[0]["outcome"], "agent_stop")
+                self.assertIn("ceiling", decisions[0]["error"])
+                self.assertEqual(len(decisions), 1)
+                self.assertFalse(
+                    any(c["kind"] == "model" for c in self.streams(episode)["model-calls"])
+                )
                 self.assertEqual(result["player_states"]["1"], "defeated")
 
     def test_anthropic_and_openai_adapters_share_tool_semantics(self):
@@ -818,7 +819,8 @@ class TestM5Model(unittest.TestCase):
         self.assertEqual(controller.cost(response.usage), 0.0123)
         self.assertEqual(
             controller.cost({**response.usage, "provider_cost_usd": None}),
-            round(120 * 1.0 / 1e6 + 30 * 5.0 / 1e6 + 100 * 0.1 / 1e6, 8),
+            # prompt_tokens=120 includes the 100 cached tokens.
+            round(20 * 1.0 / 1e6 + 30 * 5.0 / 1e6 + 100 * 0.1 / 1e6, 8),
         )
 
     def fake_command(self, name, script):
@@ -1044,7 +1046,7 @@ print("codex jsonl noise")
             EXPERIMENT["budgets"]["model_requests_per_decision"],
         )
         self.assertEqual(decisions[2]["action_count"], 0)
-        self.assertEqual(decisions[2]["outcome"], "submitted")
+        self.assertEqual(decisions[2]["outcome"], "malformed")
 
 
 if __name__ == "__main__":

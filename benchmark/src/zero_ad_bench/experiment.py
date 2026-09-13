@@ -1,10 +1,18 @@
 """Preregistered trial sets: freeze the plan, run every episode, account for all of them."""
 
+import copy
 import json
 import subprocess
 from pathlib import Path
 
-from zero_ad_bench import ARTIFACT_SCHEMA_VERSION, PACKAGE_VERSION, PROTOCOL_VERSION, analysis
+from zero_ad_bench import (
+    ARTIFACT_SCHEMA_VERSION,
+    PACKAGE_VERSION,
+    PROTOCOL_VERSION,
+    analysis,
+    planning,
+    provenance,
+)
 from zero_ad_bench.agents import make_controller
 from zero_ad_bench.engine import DEFAULT_ENGINE, EngineError, EngineProcess
 from zero_ad_bench.environment import Episode, RunOptions
@@ -33,7 +41,7 @@ def git_commit(root):
         return None
 
 
-def build_plan(
+def build_plan(  # noqa: PLR0913 - explicit operator inputs are pinned independently
     suite_path,
     split,
     controller_specs,
@@ -43,13 +51,23 @@ def build_plan(
     scenario_ids=None,
     engine=DEFAULT_ENGINE,
     options=None,
+    mod_sources=None,
+    seed_file=None,
 ):
     """Build the preregistration: everything determining the trial set, hashed before any run."""
     suite, scenarios, path = load_suite(suite_path)
-    seeds = suite["seed_splits"][split]
-    if isinstance(seeds, dict):
-        message = f"Split {split!r} is not held in the repository; supply its seed file"
-        raise TypeError(message)
+    seeds = planning.seeds_for_split(suite, split, seed_file)
+    runtime = planning.runtime_options(options, engine=engine, mod_sources=mod_sources)
+    if split != "development" and runtime["turn_limit_override"] is not None:
+        raise ValueError("Scored runs cannot override the registered horizon")
+    if "model" in controller_specs:
+        if experiment_config is None:
+            raise ValueError("Model trials require an experiment configuration")
+        planning.episode_reservation([experiment_config])
+    planning.validate_experiment_budget(
+        runtime["experiment_budget"],
+        paid=("model" in controller_specs and experiment_config["provider"]["kind"] != "mock"),
+    )
     chosen = [s for s in suite["scenarios"] if scenario_ids is None or s in scenario_ids]
     trials = []
     for scenario_id in chosen:
@@ -66,7 +84,6 @@ def build_plan(
                             "trial": trial,
                         }
                     )
-    root = path.resolve().parents[1]
     plan = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "preregistered_utc": utc_now(),
@@ -83,6 +100,7 @@ def build_plan(
                 "objective": scenarios[s].describe()["objective"],
                 "family": scenarios[s].family,
                 "baseline": scenarios[s].baseline,
+                "resolved": scenarios[s].describe(),
             }
             for s in chosen
         },
@@ -92,15 +110,19 @@ def build_plan(
         "trials_per_seed": trials_per_seed,
         "trial_count": len(trials),
         "trials": trials,
-        "experiment_config": experiment_config,
-        "options": options or {},
+        "experiment_config": copy.deepcopy(experiment_config),
+        "options": runtime,
+        "inputs": provenance.capture(
+            list(dict.fromkeys(m for s in chosen for m in scenarios[s].mods)), mod_sources, engine
+        ),
         "versions": {
             **suite.get("versions", {}),
             "runner": PACKAGE_VERSION,
             "protocol": PROTOCOL_VERSION,
             "scaffold": SCAFFOLD_VERSION,
             "engine_binary_sha256": sha256_file(engine) if Path(engine).is_file() else None,
-            "git_commit": git_commit(root),
+            "git_commit": git_commit(provenance.ROOT),
+            "runtime": provenance.runtime_versions(),
         },
         "analysis": suite.get("analysis", {}),
         "exclusion_rules": (
@@ -123,81 +145,72 @@ def make_trial_controller(spec, scenario, seed, experiment_config):
     return make_controller(spec)
 
 
-def run_plan(  # noqa: PLR0913 - one keyword per operator setting
+def run_plan(  # noqa: PLR0913 - explicit operator overrides must match the frozen plan
     plan,
     scenarios,
     output_root,
     *,
     experiment_config=None,
-    engine=DEFAULT_ENGINE,
-    decision_deadline_s=30.0,
-    process_deadline_s=1800,
+    engine=None,
+    decision_deadline_s=None,
+    process_deadline_s=None,
     mod_sources=None,
     resume=True,
 ):
-    """Run every trial in the plan, appending one accounting row per attempt as it finishes."""
-    output_root = Path(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    plan_path = output_root / "preregistration.json"
-    if plan_path.is_file():
-        existing = json.loads(plan_path.read_text())
-        if (
-            existing["trials"] != plan["trials"]
-            or existing["suite"]["sha256"] != plan["suite"]["sha256"]
-        ):
-            raise ValueError(
-                "An earlier preregistration in this directory differs; use a new directory"
-            )
-    else:
-        write_json_atomic(plan_path, plan)
-    plan_hash = sha256_file(plan_path)
-    rows_path = output_root / "experiment.jsonl"
-    done = {}
-    if resume and rows_path.is_file():
-        for line in rows_path.read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                done[row["trial_id"]] = row
-    manifest = {
-        "schema_version": ARTIFACT_SCHEMA_VERSION,
-        "preregistration_sha256": plan_hash,
-        "status": "running",
-        "started_utc": utc_now(),
-        "finished_utc": None,
-    }
-    write_json_atomic(output_root / "experiment-manifest.json", manifest)
-    rows = list(done.values())
-    with rows_path.open("a", encoding="utf-8") as handle:
-        for trial in plan["trials"]:
-            if trial["trial_id"] in done:
-                continue
-            row = run_trial(
-                trial,
-                scenarios[trial["scenario"]],
-                output_root,
-                experiment_config,
-                engine,
-                decision_deadline_s,
-                process_deadline_s,
-                mod_sources,
-            )
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-            handle.flush()
-            rows.append(row)
-    summary = analysis.summarize(rows, {s: scenarios[s].describe() for s in plan["scenarios"]})
-    write_json_atomic(output_root / "experiment-summary.json", summary)
-    (output_root / "experiment-report.md").write_text(
-        render_report(plan, rows, summary, plan_hash)
-    )
-    manifest.update(
+    """Execute the resolved preregistration and report all attempts, including bounded retries."""
+    runtime = planning.validate_runtime(
+        plan,
         {
-            "status": "completed",
-            "finished_utc": utc_now(),
-            "rows": len(rows),
-            "accounting": analysis.accounting(rows),
-        }
+            "engine": engine,
+            "decision_deadline_s": decision_deadline_s,
+            "process_deadline_s": process_deadline_s,
+            "mod_sources": mod_sources,
+        },
     )
-    write_json_atomic(output_root / "experiment-manifest.json", manifest)
+    if experiment_config is not None and experiment_config != plan["experiment_config"]:
+        raise ValueError("Model configuration differs from preregistration")
+    config = copy.deepcopy(plan["experiment_config"])
+    output_root = Path(output_root)
+
+    def reserve(trial):
+        count = len(scenarios[trial["scenario"]].external_seats())
+        return planning.episode_reservation(
+            [config] * count if trial["controller"] == "model" else []
+        )
+
+    def execute(trial):
+        return run_trial(
+            trial,
+            scenarios[trial["scenario"]],
+            output_root,
+            config,
+            runtime["engine"],
+            runtime["decision_deadline_s"],
+            runtime["process_deadline_s"],
+            runtime["mod_sources"],
+        )
+
+    def finish(rows, plan_hash):
+        summary = analysis.summarize(rows, {s: scenarios[s].describe() for s in plan["scenarios"]})
+        write_json_atomic(output_root / "experiment-summary.json", summary)
+        (output_root / "experiment-report.md").write_text(
+            render_report(plan, rows, summary, plan_hash)
+        )
+        return {"accounting": analysis.accounting(rows)}
+
+    rows, _plan_hash = planning.execute_schedule(
+        plan,
+        scenarios,
+        output_root,
+        stream="experiment",
+        key="trial_id",
+        schedule=plan["trials"],
+        run_one=execute,
+        reserve=reserve,
+        resume=resume,
+        finish=finish,
+    )
+    summary = json.loads((output_root / "experiment-summary.json").read_text())
     return rows, summary
 
 
@@ -212,18 +225,11 @@ def run_trial(
     mod_sources,
 ):
     scenario = scenario.with_seeds(trial["seed"], trial["ai_seed"])
-    # One instance per seat: a controller's private state must never be shared across seats.
-    controllers = {
-        seat: make_trial_controller(
-            trial["controller"], scenario, trial["seed"], experiment_config
-        )
-        for seat in (scenario.external_seats() or [1])
-    }
     episode_root = output_root / "episodes"
-    label = trial["trial_id"].replace("/", "_")
+    label = trial.get("attempt_id") or trial["trial_id"].replace("/", "_")
     row = {
         **trial,
-        "controller_name": next(iter(controllers.values())).name,
+        "controller_name": None,
         "episode": None,
         "status": "failed",
         "result": "invalid",
@@ -236,7 +242,16 @@ def run_trial(
         "failure": None,
     }
     process = None
+    episode = None
     try:
+        # One instance per seat: a controller's private state must never be shared across seats.
+        controllers = {
+            seat: make_trial_controller(
+                trial["controller"], scenario, trial["seed"], experiment_config
+            )
+            for seat in (scenario.external_seats() or [1])
+        }
+        row["controller_name"] = next(iter(controllers.values())).name
         process = EngineProcess(
             output_root / "engines" / label,
             engine=engine,
@@ -249,6 +264,7 @@ def run_trial(
             decision_deadline_s=decision_deadline_s,
             experiment_id=f"{trial['scenario']}:{trial['controller']}",
             label=trial["trial_id"],
+            attempt_id=trial.get("attempt_id"),
         )
         episode = Episode(
             scenario,
@@ -282,7 +298,23 @@ def run_trial(
             row["result"] = full_game_result(result)
     except EngineError as exc:
         row["failure"] = exc.record()
+    except Exception as exc:  # noqa: BLE001 - account for construction and runner defects
+        row["failure"] = {
+            "kind": "runner_error",
+            "code": type(exc).__name__,
+            "message": str(exc)[:500],
+        }
     finally:
+        if episode is not None and episode.artifacts is not None:
+            row["episode"] = str(episode.artifacts.directory.relative_to(output_root))
+        result = episode.result if episode is not None else None
+        usage = (result or {}).get("model_usage") or {}
+        row["budget_consumed"] = {
+            "tokens": usage.get("budget_tokens", 0),
+            "cost_usd": usage.get("budget_cost_usd", 0),
+        }
+        if episode is not None and episode.result is None:
+            row["budget_consumed"] = trial.get("reservation", row["budget_consumed"])
         if process is not None:
             process.close()
     return row

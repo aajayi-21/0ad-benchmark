@@ -101,7 +101,7 @@ class EngineProcess:
             stderr=self.log,
         )
 
-    def call(self, operation, body=None, request_id=None):
+    def call(self, operation, body=None, request_id=None, *, timeout_s=None):
         """Perform one HTTP request and return `(status, decoded JSON)`; transport errors raise."""
         headers = {
             "Content-Type": "application/json",
@@ -115,7 +115,12 @@ class EngineProcess:
             f"{self.url}/benchmark/v1/{operation}", data=data, headers=headers, method=method
         )
         try:
-            response = self.opener.open(req, timeout=self.request_timeout_s)
+            response = self.opener.open(
+                req,
+                timeout=min(self.request_timeout_s, timeout_s)
+                if timeout_s is not None
+                else self.request_timeout_s,
+            )
         except error.HTTPError as exc:
             response = exc
         except (OSError, error.URLError) as exc:

@@ -14,8 +14,13 @@ PACKAGE = ROOT / "benchmark/src"
 if str(PACKAGE) not in sys.path:
     sys.path.insert(0, str(PACKAGE))
 
-from zero_ad_bench import competition, report  # noqa: E402
-from zero_ad_bench.agents import SleepingController, make_controller  # noqa: E402
+from zero_ad_bench import competition, investigate, report  # noqa: E402
+from zero_ad_bench.agents import (  # noqa: E402
+    DecisionResult,
+    ScriptedController,
+    SleepingController,
+    make_controller,
+)
 from zero_ad_bench.engine import EngineProcess  # noqa: E402
 from zero_ad_bench.environment import Episode, RunOptions  # noqa: E402
 from zero_ad_bench.model_agent import ModelController  # noqa: E402
@@ -140,7 +145,7 @@ class TestM7Competition(unittest.TestCase):
         self.assertEqual(second["participants"], {"1": "idle", "2": "eco"})
         self.assertEqual(first["seed_pair"], second["seed_pair"])
         self.assertTrue(plan["matches"][0]["mirror"])
-        self.assertEqual(plan["versions"]["scaffold"], "3")
+        self.assertEqual(plan["versions"]["scaffold"], "4")
         self.assertEqual(plan["timeout_policy"]["consecutive_failures_for_forfeit"], 3)
         scenario = scenarios["match_conquest_v1"]
         self.assertEqual(scenario.external_seats(), [1, 2])
@@ -299,6 +304,71 @@ class TestM7Competition(unittest.TestCase):
             double["administrative"]["1"]["turn"], double["administrative"]["2"]["turn"]
         )
 
+    def test_invalid_models_forfeit_but_explicit_empty_submissions_do_not(self):
+        invalid = ModelController(MockProvider(lambda *_: {"text": "no submission"}), {})
+        valid = ModelController(
+            MockProvider(
+                lambda *_: {
+                    "tool_calls": [
+                        {"name": "submit_actions", "input": {"actions": [], "plan": None}}
+                    ]
+                }
+            ),
+            {},
+        )
+        episode, result = self.run_match({1: valid, 2: invalid}, "invalid-model", turn_limit=200)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIsNone(result["administrative"]["1"])
+        self.assertEqual(result["administrative"]["2"]["kind"], "forfeit")
+        self.assertEqual(result["administrative"]["2"]["turn"], 100)
+        decisions, _ = read_jsonl(episode.artifacts.directory / "decisions.jsonl")
+        self.assertEqual(
+            [d["outcome"] for d in decisions if d["seat"] == 2],
+            ["malformed", "malformed", "forfeit"],
+        )
+        self.assertTrue(all(d["outcome"] == "submitted" for d in decisions if d["seat"] == 1))
+
+    def test_rejected_batches_and_reports_preserve_the_correct_seat(self):
+        def policy(gateway):
+            actions = (
+                []
+                if gateway.seat == 2
+                else [
+                    {
+                        "action_id": "seat-one-rejected",
+                        "type": "move",
+                        "units": ["missing-handle"],
+                        "position": {"x": 100, "z": 100},
+                        "queued": False,
+                    }
+                ]
+            )
+            return DecisionResult(actions, {"plan": f"seat-{gateway.seat}-plan"})
+
+        episode, result = self.run_match(
+            {1: ScriptedController(policy), 2: ScriptedController(policy)},
+            "seat-reports",
+            turn_limit=1,
+        )
+        self.assertEqual(result["status"], "completed", result)
+        directory = episode.artifacts.directory
+        actions, _ = read_jsonl(directory / "actions.jsonl")
+        submission = next(a for a in actions if a["kind"] == "submission")
+        self.assertEqual(submission["batches"][0]["actions"][0]["units"], ["missing-handle"])
+        self.assertEqual(submission["batches"][1]["actions"], [])
+        rows = [
+            line.split("|")
+            for line in (directory / "report.md").read_text().splitlines()
+            if line.startswith("| 0 | 0 |")
+        ]
+        self.assertEqual({int(row[3]): int(row[7]) for row in rows}, {1: 1, 2: 0})
+        for seat in (1, 2):
+            text = investigate.investigate_episode(directory, seat=seat)
+            self.assertIn(f"seat-{seat}-plan", text)
+            self.assertNotIn(f"seat-{3 - seat}-plan", text)
+            if seat == 2:
+                self.assertNotIn("seat-one-rejected", text)
+
     def test_competition_accounts_by_matchup_and_side(self):
         suite_dir = self.directory / "competition"
         suite_dir.mkdir()
@@ -317,7 +387,12 @@ class TestM7Competition(unittest.TestCase):
             "development",
             PARTICIPANTS,
             matchups,
-            options={"turn_limit_override": 100},
+            options={
+                "turn_limit_override": 100,
+                "decision_deadline_s": 20,
+                "process_deadline_s": 600,
+                "max_attempts": 1,
+            },
         )
         self.assertEqual(plan["match_count"], 6)
         output = self.directory / "run"

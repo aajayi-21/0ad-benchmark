@@ -1,20 +1,27 @@
 """Episode lifecycle: reset, synchronized decisions, exact advances, artifacts, finalize."""
 
+import copy
 import json
 import secrets
 import shutil
-import threading
 import time
 import traceback
 from collections import Counter
 from dataclasses import asdict, dataclass
+from multiprocessing.connection import wait
 from pathlib import Path
 
-from zero_ad_bench import PROTOCOL_VERSION, evaluation, report
+from zero_ad_bench import PROTOCOL_VERSION, evaluation, provenance, report
 from zero_ad_bench.agents import AgentStop, DecisionResult, NoOpController, ProviderFailure
 from zero_ad_bench.engine import EngineError
 from zero_ad_bench.scenario import INFORMATION_TRACKS, PHASE_ORDER
 from zero_ad_bench.telemetry import EpisodeArtifacts
+from zero_ad_bench.workers import (
+    ControllerWorker,
+    DecisionExpired,
+    exception_record,
+    restore_exception,
+)
 
 
 class Interrupted(Exception):  # noqa: N818
@@ -33,6 +40,7 @@ class RunOptions:
     max_consecutive_failures: int = 3
     experiment_id: str = "local"
     label: str | None = None
+    attempt_id: str | None = None
     # A shortened horizon for smoke runs; scored runs must leave this unset.
     turn_limit_override: int | None = None
 
@@ -47,7 +55,7 @@ def phase_of(researched):
 class PlayerGateway:
     """The only surface a controller sees: one seat's frozen view plus read-only tools."""
 
-    def __init__(self, episode, seat, decision_id, turn):
+    def __init__(self, episode, seat, decision_id, turn, deadline_at=None):
         self.episode = episode
         self.seat = seat
         self.decision_id = decision_id
@@ -56,13 +64,25 @@ class PlayerGateway:
         self.read_budget = episode.scenario.limits["reads_per_decision"]
         self.decision_turns = episode.scenario.decision_turns
         self.deadline_s = episode.options.decision_deadline_s
-        self.view = episode.views[seat]
+        self.deadline_at = (
+            deadline_at if deadline_at is not None else time.monotonic() + self.deadline_s
+        )
+        self.revoked = False
+        self.view = copy.deepcopy(episode.views[seat])
+
+    def remaining_s(self):
+        remaining = self.deadline_at - time.monotonic()
+        if self.revoked or remaining <= 0:
+            raise DecisionExpired("Decision gateway expired")
+        return remaining
 
     def observation(self):
-        return self.view
+        self.remaining_s()
+        return copy.deepcopy(self.view)
 
     def record(self, kind, payload):
         """Append a controller record (model call, tool call) to model-calls.jsonl."""
+        self.remaining_s()
         self.episode.artifacts.append(
             "model-calls",
             {
@@ -75,12 +95,13 @@ class PlayerGateway:
         )
 
     def _tool(self, operation, body, charged=True):
+        self.remaining_s()
         if charged and self.reads >= self.read_budget:
             raise BudgetExceeded(f"Read budget of {self.read_budget} exhausted")
         if charged:
             self.reads += 1
         started = time.monotonic()
-        status, envelope = self.episode.engine.call(operation, body)
+        status, envelope = self.episode.engine.call(operation, body, timeout_s=self.remaining_s())
         response = envelope.get("data") if envelope.get("ok") else {"error": envelope.get("error")}
         self.record(
             "tool",
@@ -168,6 +189,8 @@ class Episode:
         self.interrupt_requested = False
         self.result = None
         self.engine_info = None
+        self.workers = {}
+        self.inputs = None
 
     def request_interrupt(self):
         self.interrupt_requested = True
@@ -186,6 +209,7 @@ class Episode:
             while not self._stop_reason():
                 self._check_interrupt()
                 self._decide_and_advance()
+            self._check_inputs()
             self._finalize()
         except EngineError as exc:
             status = "failed"
@@ -210,6 +234,14 @@ class Episode:
             raise unexpected
         return self.result
 
+    def _check_inputs(self):
+        if self.inputs != provenance.capture(
+            self.scenario.mods, self.mod_sources, self.engine.engine
+        ):
+            raise EngineError(
+                "provenance", "changed_inputs", "Gameplay inputs changed during the episode"
+            )
+
     def _absorb(self, envelope):
         self.data = envelope["data"]
         self.turn = envelope["turn"]
@@ -219,6 +251,7 @@ class Episode:
 
     def _reset(self):
         scenario = self.scenario
+        self.inputs = provenance.capture(scenario.mods, self.mod_sources, self.engine.engine)
         self.engine_info = self.engine.request("health")["data"]
         body = {
             "attributes": scenario.resolve(),
@@ -244,11 +277,31 @@ class Episode:
                 "scenario": scenario.describe(),
                 "attributes": body["attributes"],
                 "reset_request": {k: v for k, v in body.items() if k != "attributes"},
-                "content_hashes": scenario.content_hashes(self.mod_sources),
+                "content_hashes": scenario.content_hashes(self.mod_sources, self.engine.engine),
+                "inputs": self.inputs,
                 "replay_directory": self.data["replay_directory"],
                 "engine": self.engine_info,
             },
         )
+        # Scheduled runs already archive these files once at experiment scope. Preserve the
+        # same evidence for standalone paid episodes before any provider request can start.
+        if self.options.attempt_id is None and any(
+            getattr(getattr(c, "provider", None), "name", "mock") != "mock"
+            for c in self.controllers.values()
+        ):
+            if self.inputs["lfs_pointers"]:
+                raise EngineError(
+                    "provenance",
+                    "unresolved_assets",
+                    "Paid runs require materialized gameplay inputs",
+                )
+            provenance.archive(
+                self.artifacts.directory,
+                self.inputs,
+                scenario.mods,
+                self.mod_sources,
+                self.engine.engine,
+            )
 
     def _open_artifacts(self):
         self.artifacts = EpisodeArtifacts(self.output_root / f"episode_{self.episode_id}")
@@ -259,6 +312,9 @@ class Episode:
                 "scenario_id": self.scenario.id,
                 "protocol_version": PROTOCOL_VERSION,
                 "engine": self.engine_info,
+                "engine_binary_sha256": provenance.digest(self.engine.engine)[0],
+                "runtime": provenance.runtime_versions(),
+                "inputs_sha256": self.inputs["sha256"] if self.inputs else None,
                 "engine_process": {"pid": self.engine.process.pid, "port": self.engine.port},
                 "options": asdict(self.options),
                 "seats": list(self.seats),
@@ -372,61 +428,142 @@ class Episode:
         }
 
     def _collect_all(self, decision_id, turn):
-        """Run every seat's controller concurrently under one shared wall-clock deadline.
-
-        Simulated time stays paused. Each controller sees only its own frozen view through its
-        own gateway, so no seat can inspect another's uncommitted actions. The order in which
-        controllers finish is recorded as `arrival_rank` for evidence; the batch order is always
-        ascending seat order and does not depend on it.
-        """
-        gateways = {seat: PlayerGateway(self, seat, decision_id, turn) for seat in self.seats}
-        holders = {seat: {} for seat in self.seats}
+        """Collect simultaneous decisions from isolated workers under one absolute deadline."""
         started = time.monotonic()
-
-        def work(seat):
-            holder = holders[seat]
-            try:
-                holder["actions"] = self.controllers[seat].decide(gateways[seat])
-            except BaseException as exc:  # noqa: BLE001
-                holder["error"] = exc
-            holder["finished"] = time.monotonic()
-
-        threads = {
-            seat: threading.Thread(target=work, args=(seat,), daemon=True) for seat in self.seats
-        }
-        for thread in threads.values():
-            thread.start()
         deadline = started + self.options.decision_deadline_s
-        for thread in threads.values():
-            thread.join(max(0.0, deadline - time.monotonic()))
-        timed_out = {
-            seat
-            for seat, thread in threads.items()
-            if thread.is_alive() or holders[seat]["finished"] > deadline
+        gateways = {
+            seat: PlayerGateway(self, seat, decision_id, turn, deadline) for seat in self.seats
         }
-        order = sorted(
-            (holders[seat]["finished"], seat) for seat in self.seats if seat not in timed_out
-        )
+        holders = {}
+        pending = set()
+        for seat in self.seats:
+            worker = self.workers.setdefault(seat, ControllerWorker(self.controllers[seat]))
+            if worker.begin(gateways[seat]):
+                pending.add(seat)
+        try:
+            while pending:
+                self._check_interrupt()
+                connections = {self.workers[seat].connection: seat for seat in pending}
+                ready = wait(
+                    list(connections), timeout=min(0.1, max(0, deadline - time.monotonic()))
+                )
+                if not ready:
+                    if time.monotonic() >= deadline:
+                        break
+                    continue
+                for connection in ready:
+                    seat = connections[connection]
+                    worker = self.workers[seat]
+                    gateway = gateways[seat]
+                    try:
+                        message = connection.recv()
+                    except (EOFError, OSError):
+                        holders[seat] = {
+                            "error": EngineError(
+                                "worker",
+                                "unexpected_exit",
+                                "Controller worker exited without a result",
+                            ),
+                            "finished": time.monotonic(),
+                        }
+                        pending.remove(seat)
+                        worker.stop()
+                        continue
+                    if message["operation"] == "finished":
+                        if message["finished"] <= deadline:
+                            worker.accept_checkpoint(message["checkpoint"])
+                            holders[seat] = {**message}
+                            if "error" in message:
+                                holders[seat]["error"] = restore_exception(message["error"])
+                            pending.remove(seat)
+                        continue
+                    if time.monotonic() >= deadline:
+                        break
+                    reply = self._worker_read(worker, gateway, message)
+                    connection.send({"reads": gateway.reads, **reply})
+                if time.monotonic() >= deadline:
+                    break
+        finally:
+            for seat, gateway in gateways.items():
+                gateway.revoked = True
+                if seat not in holders:
+                    worker = self.workers[seat]
+                    worker.stop()
+                    if worker.pending_request:
+                        # An unresolved transport call has unknown usage. It is infrastructure,
+                        # not evidence that an agent chose to miss a decision.
+                        record = worker.pending_request
+                        error = {
+                            "kind": "timeout",
+                            "message": "Provider deadline expired",
+                            "retryable": False,
+                        }
+                        self.artifacts.append(
+                            "model-calls",
+                            {
+                                "kind": "model",
+                                "seat": seat,
+                                "decision_id": decision_id,
+                                "turn": turn,
+                                **record,
+                                "response": None,
+                                "usage": None,
+                                "cost_usd": None,
+                                "cost_source": None,
+                                "error": error,
+                                "latency_s": time.monotonic() - started,
+                            },
+                        )
+                        holders[seat] = {"error": ProviderFailure(error), "finished": deadline}
+        order = sorted((holder["finished"], seat) for seat, holder in holders.items())
         ranks = {seat: rank for rank, (_, seat) in enumerate(order, start=1)}
         collected = {}
         for seat in self.seats:
-            gateway = gateways[seat]
-            if seat in timed_out:
-                elapsed = round(time.monotonic() - started, 6)
-                collected[seat] = ([], "timeout", elapsed, None, {}, None, gateway)
+            if seat not in holders:
+                collected[seat] = (
+                    [],
+                    "timeout",
+                    self.options.decision_deadline_s,
+                    None,
+                    {},
+                    None,
+                    gateways[seat],
+                )
                 continue
-            elapsed = round(holders[seat]["finished"] - started, 6)
-            actions, outcome, error_text, metadata = self._interpret(holders[seat])
+            holder = holders[seat]
+            actions, outcome, error_text, metadata = self._interpret(holder)
             collected[seat] = (
                 actions,
                 outcome,
-                elapsed,
+                round(holder["finished"] - started, 6),
                 error_text,
                 metadata,
                 ranks[seat],
-                gateway,
+                gateways[seat],
             )
         return collected
+
+    @staticmethod
+    def _worker_read(worker, gateway, message):
+        operation = message["operation"]
+        if operation not in ("record", "inspect", "briefing", "catalog"):
+            return {"error": {"kind": "controller", "message": "Unknown gateway operation"}}
+        try:
+            value = getattr(gateway, operation)(*message["args"], **message["kwargs"])
+            if operation == "record":
+                kind, payload = message["args"]
+                if kind == "model_request_started":
+                    worker.pending_request = payload
+                elif kind == "model":
+                    worker.pending_request = None
+                if message["checkpoint"] is not None:
+                    worker.accept_checkpoint(message["checkpoint"])
+        except BudgetExceeded as exc:
+            return {"error": {"kind": "read_budget", "message": str(exc)}}
+        except Exception as exc:  # noqa: BLE001 - send the failure to the owning controller
+            return {"error": exception_record(exc)}
+        else:
+            return {"result": value}
 
     @staticmethod
     def _interpret(holder):
@@ -446,6 +583,8 @@ class Episode:
             actions = actions.actions
         if not isinstance(actions, list) or not all(isinstance(a, dict) for a in actions):
             return [], "malformed", None, metadata
+        if metadata.get("controller") == "model" and metadata.get("reason") != "submitted":
+            return [], "malformed", metadata.get("reason"), metadata
         return actions, "submitted", None, metadata
 
     def _decide_and_advance(self):
@@ -500,6 +639,17 @@ class Episode:
             )
             batches.append({"seat": seat, "actions": actions})
         self._check_interrupt()
+        for (
+            _actions,
+            outcome,
+            _elapsed,
+            error_text,
+            _metadata,
+            _rank,
+            _gateway,
+        ) in collected.values():
+            if outcome == "provider_failure":
+                raise EngineError("provider", "persistent_failure", error_text)
         body = {
             "episode_id": self.episode_id,
             "expected_turn": turn,
@@ -507,6 +657,10 @@ class Episode:
             "turns": self.scenario.decision_turns,
             "batches": batches,
         }
+        # Preserve exactly what crossed the runner boundary, including rejected actions.
+        self.artifacts.append(
+            "actions", {"kind": "submission", "request_id": f"advance-{decision_id}", **body}
+        )
         envelope = self.engine.mutate("advance", body, f"advance-{decision_id}")
         self._absorb(envelope)
         self._record_interval(decision_id)
@@ -561,6 +715,16 @@ class Episode:
                 self.artifacts.copy_file(replay / name, f"replay/{name}")
 
     def _close(self, status, failure):
+        for worker in self.workers.values():
+            try:
+                worker.stop()
+            except Exception as exc:  # noqa: BLE001 - still close all other seats and artifacts
+                status = "failed"
+                failure = {
+                    "kind": "cleanup_error",
+                    "code": type(exc).__name__,
+                    "message": str(exc)[:500],
+                }
         if self.artifacts is None:
             return
         try:

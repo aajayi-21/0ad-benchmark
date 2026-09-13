@@ -84,7 +84,7 @@ class TestM6Suite(unittest.TestCase):
             scenarios["raid_defense_v1"].resolve()["settings"]["TriggerScripts"],
             ["scripts/suite_raid.js"],
         )
-        self.assertEqual(suite["versions"]["scaffold"], "3")
+        self.assertEqual(suite["versions"]["scaffold"], "4")
 
     def test_scripted_baselines_demonstrate_feasibility(self):
         _, scenarios, _ = experiment.load_suite(SUITE)
@@ -224,10 +224,13 @@ class TestM6Suite(unittest.TestCase):
         }
         (suite_dir / "suite_tiny.json").write_text(json.dumps(tiny))
         plan, plan_scenarios = experiment.build_plan(
-            suite_dir / "suite_tiny.json", "development", ["noop", "scripted"]
+            suite_dir / "suite_tiny.json",
+            "development",
+            ["noop", "scripted"],
+            options={"decision_deadline_s": 20, "process_deadline_s": 600, "max_attempts": 1},
         )
         self.assertEqual(plan["trial_count"], 8)
-        self.assertEqual(plan["versions"]["scaffold"], "3")
+        self.assertEqual(plan["versions"]["scaffold"], "4")
         self.assertTrue(plan["versions"]["engine_binary_sha256"])
         output = self.directory / "experiment"
         rows, summary = experiment.run_plan(
@@ -304,10 +307,11 @@ class TestM6Suite(unittest.TestCase):
             (timing["successes"], timing["censored_at_horizon"], timing["median_turn"]),
             (3, 1, 100),
         )
-        self.assertIsNone(
+        self.assertEqual(
             analysis.time_to_success([row(1, "failure"), row(2, "success", achieved=50)], 500)[
                 "median_turn"
-            ]
+            ],
+            50,
         )
         accounting = analysis.accounting(rows)
         self.assertEqual(accounting["exclusion_reasons"], {"invalid": 1, "failed": 1})

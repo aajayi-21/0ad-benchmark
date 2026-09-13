@@ -70,7 +70,7 @@ def _loss_turn(result, events, seat):
     )
 
 
-def investigate_episode(episode_dir, window=6):
+def investigate_episode(episode_dir, window=6, seat=None):
     """Render one episode: the player's view around the loss, then the evaluator's view."""
     episode_dir = Path(episode_dir)
     result = json.loads((episode_dir / "result.json").read_text())
@@ -81,14 +81,17 @@ def investigate_episode(episode_dir, window=6):
     events, _ = read_jsonl(episode_dir / "events.jsonl")
     objective = resolved["scenario"]["objective"]
     achieved = (result.get("objective") or {}).get("achieved_turn")
-    seat = observations[0]["seat"]
+    seat = seat if seat is not None else objective["player"]
+    observations = [o for o in observations if o["seat"] == seat]
+    if not observations:
+        return f"No recorded observations for seat {seat}."
     # Anchor the window on the objective's loss point when one exists, else the last decisions.
     loss_turn = _loss_turn(result, events, seat)
     anchor = loss_turn if loss_turn is not None else observations[-1]["turn"]
     boundaries = [o for o in observations if o["turn"] <= anchor][-window:]
     results_by_decision = {}
     for action in actions:
-        if action["kind"] == "result":
+        if action["kind"] == "result" and action["seat"] == seat:
             label = f"{action['action_id']}:{action['stage']}"
             if action.get("reason"):
                 label += f"({action['reason']})"
@@ -101,13 +104,18 @@ def investigate_episode(episode_dir, window=6):
         "",
         f"Objective: {objective.get('public') or objective.get('success')}",
         "",
-        "#### What the player knew, decision by decision",
+        f"#### What player {seat} knew, decision by decision",
         "",
     ]
     for observation in boundaries:
         view = player_view(observation["observation"])
         decision = next(
-            (d for d in decisions if d["decision_id"] == observation["decision_id"]), None
+            (
+                d
+                for d in decisions
+                if d["decision_id"] == observation["decision_id"] and d["seat"] == seat
+            ),
+            None,
         )
         submitted = results_by_decision.get(observation["decision_id"], [])
         lines.append(

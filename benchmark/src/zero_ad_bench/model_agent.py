@@ -9,14 +9,21 @@ runner records as an infrastructure failure, never as a strategic no-op.
 
 import hashlib
 import json
+import math
 import time
 
 from zero_ad_bench.agents import AgentStop, DecisionResult, ProviderFailure
 from zero_ad_bench.environment import BudgetExceeded
-from zero_ad_bench.providers import ProviderError, ProviderRequest, ToolSpec, tool_schema_hash
+from zero_ad_bench.providers import (
+    ProviderError,
+    ProviderRequest,
+    ToolSpec,
+    tool_schema_hash,
+    total_usage_tokens,
+)
 
 
-SCAFFOLD_VERSION = "3"
+SCAFFOLD_VERSION = "4"
 
 # Public action families (M2 contract): required inputs and the scaffold's documented defaults
 # for inputs a model may omit. The engine contract stays strict; the scaffold fills these
@@ -50,6 +57,43 @@ ACTION_DEFAULTS = {
 MAX_ACTIONS = 20
 
 
+def validate_budget_config(config, *, paid):
+    """Reject missing paid-run ceilings and values that cannot bound resource consumption."""
+    budgets = config.get("budgets") or {}
+    for key in ("episode_tokens", "episode_cost_usd"):
+        value = budgets.get(key)
+        if value is None and not paid:
+            continue
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"Configure a finite positive {key} before a paid run")
+        if key == "episode_tokens" and not isinstance(value, int):
+            raise ValueError("episode_tokens must be an integer")
+    pricing = config.get("pricing_usd_per_million") or {}
+    if budgets.get("episode_cost_usd") is not None:
+        for key in ("input", "output"):
+            value = pricing.get(key)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(f"Configure a finite nonnegative {key} price for reservations")
+    for value in pricing.values():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError("Configured token prices must be finite and nonnegative")
+
+
 def validate_actions(actions):
     """Check a batch against the public action schema and fill documented defaults.
 
@@ -77,8 +121,9 @@ def validate_actions(actions):
             errors.append(f"{label}: action_id must be a non-empty string")
         elif action_id in seen:
             errors.append(f"{label}: duplicate action_id")
-        seen.add(action_id)
-        if kind not in ACTION_FIELDS:
+        if isinstance(action_id, str):
+            seen.add(action_id)
+        if not isinstance(kind, str) or kind not in ACTION_FIELDS:
             errors.append(
                 f"{label}: unknown type {kind!r}; known types: " + ", ".join(sorted(ACTION_FIELDS))
             )
@@ -123,6 +168,40 @@ def _schema(properties, required):
     }
 
 
+# Each branch is closed independently: strict providers accept the nested union and can
+# produce the real action fields. The engine remains the authority for handles and legality.
+ACTION_VALUE_SCHEMAS = {
+    "units": {"type": "array", "items": HANDLE, "minItems": 1, "maxItems": 64},
+    "position": _schema({"x": {"type": "number"}, "z": {"type": "number"}}, ["x", "z"]),
+    "target": HANDLE,
+    "building": HANDLE,
+    "holder": HANDLE,
+    "queue": HANDLE,
+    "template": {"type": "string"},
+    "technology": {"type": "string"},
+    "count": {"type": "integer", "minimum": 1, "maximum": 5},
+    "angle": {"type": "number"},
+    "stance": {
+        "type": "string",
+        "enum": ["violent", "aggressive", "defensive", "passive", "standground"],
+    },
+    **{name: {"type": "boolean"} for name in ACTION_DEFAULTS if name != "angle"},
+}
+ACTION_SCHEMA = {
+    "anyOf": [
+        _schema(
+            {
+                "action_id": HANDLE,
+                "type": {"type": "string", "enum": [kind]},
+                **{field: ACTION_VALUE_SCHEMAS[field] for field in fields},
+            },
+            ["action_id", "type", *fields],
+        )
+        for kind, fields in ACTION_FIELDS.items()
+    ]
+}
+
+
 TOOLS = [
     ToolSpec(
         "read_briefing",
@@ -155,8 +234,10 @@ TOOLS = [
                 "min_z": {"type": "number"},
                 "max_x": {"type": "number"},
                 "max_z": {"type": "number"},
+                "cursor": {"type": ["string", "null"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 64},
             },
-            ["min_x", "min_z", "max_x", "max_z"],
+            ["min_x", "min_z", "max_x", "max_z", "cursor", "limit"],
         ),
     ),
     ToolSpec(
@@ -195,7 +276,7 @@ TOOLS = [
         "and optionally a short declared plan. This ends the decision.",
         _schema(
             {
-                "actions": {"type": "array", "items": {"type": "object"}, "maxItems": 20},
+                "actions": {"type": "array", "items": ACTION_SCHEMA, "maxItems": 20},
                 "plan": {"type": ["string", "null"]},
             },
             ["actions", "plan"],
@@ -241,7 +322,8 @@ Budget per decision: at most 20 actions, a fixed number of read tool calls, and 
 of model requests; the remaining counts are stated in each decision header and after every
 tool result. Every model request counts, including reads, so read only what you need. The
 last model request of a decision accepts only submit_actions and the scaffold forces that
-tool; a decision that never submits is a wait. Finish every decision by calling submit_actions
+tool. A decision without a valid submission counts as a failure; three consecutive failures
+forfeit the episode. Finish every decision by calling submit_actions
 exactly once (an empty list means wait). If you cannot decide, submit an empty list rather
 than nothing. Keep private notes with write_notes; they are the only memory carried between
 decisions besides the observation itself. You may call several tools in one response: read
@@ -264,6 +346,7 @@ class ModelController:
     name = "model"
 
     def __init__(self, provider, config):
+        validate_budget_config(config, paid=provider.name != "mock")
         self.provider = provider
         self.config = config
         budgets = config.get("budgets", {})
@@ -299,14 +382,37 @@ class ModelController:
             "requests": 0,
             "attempts": 0,
             "retries": 0,
+            "budget_tokens": 0,
+            "budget_cost_usd": 0.0,
+            "tokens_unavailable": False,
         }
         self.budget_stop = None
+
+    def checkpoint(self):
+        """Serializable private state retained only by this seat's owning runner."""
+        return {
+            "notes": self.notes,
+            "previous_plan": self.previous_plan,
+            "totals": dict(self.totals),
+            "budget_stop": self.budget_stop,
+            "provider_calls": getattr(self.provider, "calls", None),
+        }
+
+    def restore_checkpoint(self, state):
+        self.notes = state["notes"]
+        self.previous_plan = state["previous_plan"]
+        self.totals = dict(state["totals"])
+        self.budget_stop = state["budget_stop"]
+        if state["provider_calls"] is not None:
+            self.provider.calls = state["provider_calls"]
 
     # Accounting
 
     def cost(self, usage):
         if usage.get("provider_cost_usd") is not None:
             return round(float(usage["provider_cost_usd"]), 8)
+        if usage.get("input_tokens") is None or usage.get("output_tokens") is None:
+            return None
         rates = self.pricing
         parts = [
             ("input_tokens", "input"),
@@ -318,8 +424,14 @@ class ModelController:
         for field, rate in parts:
             count = usage.get(field)
             price = rates.get(rate)
-            if count is None:
+            if count is None or count == 0:
                 continue
+            if field == "input_tokens" and usage.get("input_tokens_include_cache"):
+                count -= (usage.get("cache_read_input_tokens") or 0) + (
+                    usage.get("cache_creation_input_tokens") or 0
+                )
+                if count < 0:
+                    return None
             if price is None:
                 return None
             total += count * price / 1_000_000
@@ -338,16 +450,65 @@ class ModelController:
         return cost
 
     def _exhausted(self):
-        used = self.totals["input_tokens"] + self.totals["output_tokens"]
+        used = self.totals["budget_tokens"]
         if self.episode_tokens is not None and used >= self.episode_tokens:
             return f"episode token ceiling {self.episode_tokens} reached ({used})"
         if (
             self.episode_cost_usd is not None
-            and not self.totals["cost_unavailable"]
-            and self.totals["cost_usd"] >= self.episode_cost_usd
+            and self.totals["budget_cost_usd"] >= self.episode_cost_usd
         ):
             return f"episode cost ceiling {self.episode_cost_usd} USD reached"
         return None
+
+    def _reserve_request(self, request):
+        """Reserve before dispatch, including retries. Unknown charges retain their reservation.
+
+        UTF-8 bytes of the entire neutral request plus framing are a conservative input-token
+        allowance, not a claim that provider tokenizers are identical. Configured price bounds
+        must cover the selected provider. Actual usage is reconciled and discrepancies stop work.
+        """
+        exhausted = self._exhausted()
+        if exhausted:
+            raise AgentStop("budget_stop", exhausted)
+        input_tokens = len(json.dumps(request.neutral(), ensure_ascii=False).encode()) + 256
+        output_tokens = request.max_output_tokens
+        if self.episode_tokens is not None:
+            output_tokens = min(
+                output_tokens, self.episode_tokens - self.totals["budget_tokens"] - input_tokens
+            )
+        input_rate = max(
+            self.pricing.get(key, 0) for key in ("input", "cache_read", "cache_write")
+        )
+        output_rate = self.pricing.get("output", 0)
+        input_cost = input_tokens * input_rate / 1_000_000
+        if self.episode_cost_usd is not None:
+            remaining_cost = self.episode_cost_usd - self.totals["budget_cost_usd"] - input_cost
+            if remaining_cost < 0:
+                output_tokens = 0
+            elif output_rate > 0:
+                output_tokens = min(
+                    output_tokens, math.floor(remaining_cost * 1_000_000 / output_rate)
+                )
+        if output_tokens < 1:
+            raise AgentStop("budget_stop", "Episode ceiling cannot cover another provider request")
+        request.max_output_tokens = int(output_tokens)
+        reservation = {
+            "tokens": input_tokens + output_tokens,
+            "cost_usd": input_cost + output_tokens * output_rate / 1_000_000,
+        }
+        self.totals["budget_tokens"] += reservation["tokens"]
+        self.totals["budget_cost_usd"] += reservation["cost_usd"]
+        return reservation
+
+    def _settle_request(self, reservation, usage, cost):
+        tokens = total_usage_tokens(usage)
+        if tokens is None:
+            self.totals["tokens_unavailable"] = True
+        else:
+            self.totals["budget_tokens"] += tokens - reservation["tokens"]
+        if cost is not None:
+            self.totals["budget_cost_usd"] += cost - reservation["cost_usd"]
+            self.totals["budget_cost_usd"] = max(0, self.totals["budget_cost_usd"])
 
     # Prompt assembly
 
@@ -367,7 +528,9 @@ class ModelController:
     def requests_notice(requests_left):
         """Tell the model, beside a tool result, how many model requests remain."""
         if requests_left <= 0:
-            return "No model requests left this decision; it ends as a wait."
+            return (
+                "No model requests left; missing a valid submission counts as a failed decision."
+            )
         if requests_left == 1:
             return (
                 "1 model request left this decision: it must call submit_actions "
@@ -426,11 +589,13 @@ class ModelController:
                 max_chars=arguments.get("max_chars", 12000),
             ),
             "inspect_entities": lambda: gateway.inspect(
-                "entities", handles=arguments.get("handles")
+                "entities", handles=arguments.get("handles"), limit=64
             ),
             "inspect_region": lambda: gateway.inspect(
                 "region",
                 bounds={k: arguments.get(k) for k in ("min_x", "min_z", "max_x", "max_z")},
+                cursor=arguments.get("cursor"),
+                limit=arguments.get("limit", 64),
             ),
             "inspect_section": lambda: gateway.inspect(
                 "section",
@@ -450,9 +615,32 @@ class ModelController:
     def _call(self, gateway, request, request_index, started):
         last = None
         for attempt in range(1, self.max_attempts + 1):
+            try:
+                request.timeout_seconds(gateway.deadline_s)
+                reservation = self._reserve_request(request)
+            except ProviderError as exc:
+                raise ProviderFailure(exc.record()) from exc
+            except AgentStop as exc:
+                if last is not None:
+                    raise ProviderFailure(last.record()) from exc
+                raise
             began = time.monotonic()
             error = None
             response = None
+            gateway.record(
+                "model_request_started",
+                {
+                    "request_index": request_index,
+                    "attempt": attempt,
+                    "provider": self.provider.name,
+                    "model": request.model,
+                    "request": request.neutral(),
+                    "system_prompt_hash": self.system_prompt_hash,
+                    "tool_schema_hash": self.tool_schema_hash,
+                    "scaffold_version": SCAFFOLD_VERSION,
+                    "reservation": reservation,
+                },
+            )
             try:
                 response = self.provider.complete(request)
             except ProviderError as exc:
@@ -462,6 +650,8 @@ class ModelController:
             elapsed = round(time.monotonic() - began, 6)
             self.totals["attempts"] += 1
             cost = self._account(response.usage) if response else None
+            if response:
+                self._settle_request(reservation, response.usage, cost)
             gateway.record(
                 "model",
                 {
@@ -482,12 +672,35 @@ class ModelController:
                         else "configured"
                     ),
                     "latency_s": elapsed,
+                    "reservation": reservation,
                     "system_prompt_hash": self.system_prompt_hash,
                     "tool_schema_hash": self.tool_schema_hash,
                     "scaffold_version": SCAFFOLD_VERSION,
                 },
             )
             if response is not None:
+                if (
+                    self.episode_tokens is not None
+                    and self.totals["budget_tokens"] > self.episode_tokens
+                ) or (
+                    self.episode_cost_usd is not None
+                    and self.totals["budget_cost_usd"] > self.episode_cost_usd + 1e-8
+                ):
+                    raise ProviderFailure(
+                        {
+                            "kind": "reservation_exceeded",
+                            "message": "Provider usage exceeded configured reservation bounds",
+                        }
+                    )
+                if (self.episode_tokens is not None and self.totals["tokens_unavailable"]) or (
+                    self.episode_cost_usd is not None and self.totals["cost_unavailable"]
+                ):
+                    raise ProviderFailure(
+                        {
+                            "kind": "usage_unavailable",
+                            "message": "Cannot enforce configured provider ceilings",
+                        }
+                    )
                 return response
             last = error
             if not error.retryable or attempt == self.max_attempts:
@@ -544,6 +757,7 @@ class ModelController:
                 effort=self.effort,
                 thinking=self.thinking,
                 force_tool="submit_actions" if last_request else None,
+                deadline_at=getattr(gateway, "deadline_at", started + gateway.deadline_s),
             )
             response = self._call(gateway, request, request_index, started)
             requests_used += 1

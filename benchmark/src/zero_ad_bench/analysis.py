@@ -5,7 +5,6 @@ interrupted, and incomplete episodes are excluded from denominators and reported
 """
 
 import random
-import statistics
 
 
 BOOTSTRAP_RESAMPLES = 2000
@@ -79,9 +78,11 @@ def time_to_success(rows, horizon):
         "horizon": horizon,
         "achieved_turns": achieved,
     }
-    # A median is only meaningful when more than half the valid episodes succeeded.
-    if valid and len(achieved) * 2 > len(valid):
-        summary["median_turn"] = statistics.median(achieved)
+    # With all censoring at the horizon, the survival median is the first event at which
+    # at least half the entire cohort has succeeded. Do not condition on success alone.
+    median_index = (len(valid) + 1) // 2 - 1
+    if valid and len(achieved) > median_index:
+        summary["median_turn"] = achieved[median_index]
     else:
         summary["median_turn"] = None
     if achieved:

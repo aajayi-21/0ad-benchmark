@@ -171,6 +171,7 @@ def evaluate(objective, snapshots, outcome):
         return {
             "evaluator": objective["evaluator"],
             "version": EVALUATOR_VERSION,
+            "timing": objective.get("timing", "decision_boundary_v1"),
             "success": None,
             "achieved_turn": None,
             "censored_at_turn": None,
@@ -183,6 +184,7 @@ def evaluate(objective, snapshots, outcome):
     return {
         "evaluator": objective["evaluator"],
         "version": EVALUATOR_VERSION,
+        "timing": objective.get("timing", "decision_boundary_v1"),
         "params": params,
         "censored_at_turn": None if result.get("success") else last_turn,
         **result,

@@ -131,6 +131,8 @@ class TestM4Telemetry(unittest.TestCase):
             if e["type"] == "destroyed" and e["cause"] == "killed" and e["entity"]["owner"] == 1
         ]
         self.assertTrue(losses, "the raid must kill at least one civilian")
+        self.assertTrue(all(e["entity"]["cost"] is not None for e in losses), losses)
+        self.assertTrue(all(e["entity"]["cost"]["food"] > 0 for e in losses), losses)
         self.assertTrue(all(e["killer"]["attacker_owner"] == 2 for e in losses), losses)
         raiders = [e for e in events if e["type"] == "destroyed" and e["entity"]["owner"] == 2]
         self.assertTrue(raiders)

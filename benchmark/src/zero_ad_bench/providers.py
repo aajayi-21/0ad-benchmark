@@ -69,6 +69,16 @@ class ProviderRequest:
     # decision is restricted to submit_actions).
     force_tool: str | None = None
     metadata: dict = field(default_factory=dict)
+    # Runner monotonic time, never sent to a provider or used as an observation.
+    deadline_at: float | None = None
+
+    def timeout_seconds(self, configured):
+        if self.deadline_at is None:
+            return configured
+        remaining = self.deadline_at - time.monotonic()
+        if remaining <= 0:
+            raise ProviderError("timeout", "Decision deadline expired", retryable=False)
+        return min(configured, remaining)
 
     def neutral(self):
         """Return the provider-independent request that is logged and hashed."""
@@ -123,6 +133,8 @@ def usage_record(
     cache_write=None,
     reasoning=None,
     provider_cost_usd=None,
+    *,
+    input_tokens_include_cache=False,
 ):
     """Usage with explicit unavailability: a missing provider count is None, never zero."""
     return {
@@ -132,7 +144,20 @@ def usage_record(
         "cache_creation_input_tokens": cache_write,
         "reasoning_tokens": reasoning,
         "provider_cost_usd": provider_cost_usd,
+        "input_tokens_include_cache": input_tokens_include_cache,
     }
+
+
+def total_usage_tokens(usage):
+    """Total provider tokens, counting caches once; None means incomplete token accounting."""
+    if usage.get("input_tokens") is None or usage.get("output_tokens") is None:
+        return None
+    total = usage["input_tokens"] + usage["output_tokens"]
+    if not usage.get("input_tokens_include_cache"):
+        total += (usage.get("cache_read_input_tokens") or 0) + (
+            usage.get("cache_creation_input_tokens") or 0
+        )
+    return total
 
 
 NEUTRAL_MESSAGE_SHAPES = """
@@ -164,6 +189,7 @@ class AnthropicProvider:
         self.model = model
         self.fallbacks = fallbacks
         self.default_thinking = default_thinking
+        self.timeout_s = timeout_s
         # SDK retries are disabled: the controller logs every attempt itself.
         self.client = anthropic.Anthropic(
             api_key=api_key, base_url=base_url, timeout=timeout_s, max_retries=0
@@ -239,6 +265,7 @@ class AnthropicProvider:
 
     def complete(self, req):
         body = self.wire_request(req)
+        body["timeout"] = req.timeout_seconds(self.timeout_s)
         anthropic = self.anthropic
         try:
             if self.fallbacks:
@@ -371,7 +398,7 @@ class OpenAICompatibleProvider:
     def headers(self):
         return {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
-    def post(self, body):
+    def post(self, body, timeout_s=None):
         """POST one chat completion; returns (payload, response headers)."""
         data = json.dumps(body).encode()
         # The base URL is operator configuration, never model-supplied.
@@ -379,7 +406,7 @@ class OpenAICompatibleProvider:
             f"{self.base_url}/chat/completions", data=data, headers=self.headers(), method="POST"
         )
         try:
-            with self.opener.open(http, timeout=self.timeout_s) as response:
+            with self.opener.open(http, timeout=timeout_s or self.timeout_s) as response:
                 return json.loads(response.read().decode()), dict(response.headers)
         except error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:500]
@@ -434,6 +461,7 @@ class OpenAICompatibleProvider:
                 None,
                 details.get("reasoning_tokens"),
                 float(cost) if isinstance(cost, (int, float)) else None,
+                input_tokens_include_cache=True,
             ),
             model=payload.get("model"),
             request_id=headers.get("x-request-id") or headers.get("X-Request-Id"),
@@ -442,7 +470,7 @@ class OpenAICompatibleProvider:
         )
 
     def complete(self, req):
-        payload, headers = self.post(self.wire_request(req))
+        payload, headers = self.post(self.wire_request(req), req.timeout_seconds(self.timeout_s))
         return self.normalize(payload, headers)
 
 
@@ -592,7 +620,7 @@ class CommandProvider:
                 input=prompt if self.prompt_via == "stdin" else None,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout_s,
+                timeout=req.timeout_seconds(self.timeout_s),
                 cwd=self.workdir,
                 check=False,
             )

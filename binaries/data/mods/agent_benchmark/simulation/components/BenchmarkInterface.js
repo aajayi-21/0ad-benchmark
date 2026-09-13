@@ -354,6 +354,19 @@ BenchmarkInterface.prototype.RecordOrder = function(entity, type)
 		this.issuedOrders.set(entity, type);
 };
 
+/** Render untranslated placement facts without a GUI translator or locale-dependent advice. */
+BenchmarkInterface.prototype.PlacementParameter = function(value)
+{
+	if (value && typeof value == "object")
+	{
+		if (typeof value._string == "string")
+			return value._string;
+		if (Array.isArray(value.list))
+			return value.list.map(item => this.PlacementParameter(item)).join(", ");
+	}
+	return String(value);
+};
+
 BenchmarkInterface.prototype.ExecuteAction = function(seat, envelope)
 {
 	if (!this.recording)
@@ -417,7 +430,7 @@ BenchmarkInterface.prototype.ExecuteAction = function(seat, envelope)
 		{
 			result.reason = "placement_rejected";
 			result.message = notification.message.replace(/%\((\w+)\)s/g,
-				(match, key) => String(notification.parameters?.[key] ?? match));
+				(match, key) => this.PlacementParameter(notification.parameters?.[key] ?? match));
 		}
 	}
 	const afterQueue = queue?.GetQueue() ?? [];
@@ -648,11 +661,13 @@ BenchmarkInterface.prototype.Record = function(type, fields)
 BenchmarkInterface.prototype.RecordDestroy = function(id)
 {
 	const name = this.templateNames.get(id);
-	this.templateNames.delete(id);
 	const owner = this.formerOwners.get(id);
 	this.formerOwners.delete(id);
 	if (!this.LedgerEntity(id))
+	{
+		this.templateNames.delete(id);
 		return;
+	}
 	const attack = this.lastAttacks.get(id) ?? null;
 	this.lastAttacks.delete(id);
 	const renamed = this.renamedAway.delete(id);
@@ -662,6 +677,7 @@ BenchmarkInterface.prototype.RecordDestroy = function(id)
 	const cause = renamed ? "renamed" : health && !health.GetHitpoints() ?
 		(attack && attack.turn == this.InProgressTurn() ? "killed" : "died") : "removed";
 	const facts = this.Facts(id);
+	this.templateNames.delete(id);
 	if (owner !== undefined)
 	{
 		facts.owner = owner;
@@ -770,11 +786,17 @@ BenchmarkInterface.prototype.AccumulateMetrics = function()
 		if (owner < 1 || Engine.QueryInterface(id, IID_Foundation) || Engine.QueryInterface(id, IID_Mirage))
 			continue;
 		const record = metrics(owner);
-		const queue = Engine.QueryInterface(id, IID_ProductionQueue).GetQueue();
+		const production = Engine.QueryInterface(id, IID_ProductionQueue);
+		const queue = production.GetQueue();
+		// Trainer retains its last fractional timeRemaining after a failed spawn. Inspect the
+		// actual front batch's spawn failure state instead of assuming its timer reaches zero.
+		const batch = production.queue[0]?.entity;
+		const spawnBlocked = batch !== undefined &&
+			Engine.QueryInterface(id, IID_Trainer)?.queue.get(batch)?.spawnNotified;
 		++record.producer_turns;
 		if (!queue.length)
 			++record.empty_producer_turns;
-		else if (queue[0].paused)
+		else if (queue[0].paused || queue[0].neededSlots > 0 || spawnBlocked)
 			++record.blocked_producer_turns;
 		else
 			++record.active_producer_turns;

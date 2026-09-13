@@ -400,6 +400,12 @@ class TestM2Actions(unittest.TestCase):
         queue = self.own("civil_centre")[0]["queue"]
         self.assertTrue(queue)
         self.assertGreater(queue[0]["needed_population"], 0)
+        progress = queue[0]["progress"]
+        self.advance(25)
+        self.assertEqual(self.own("civil_centre")[0]["queue"][0]["progress"], progress)
+        metrics = self.response["data"]["interval_metrics"]["1"]
+        self.assertEqual(metrics["blocked_producer_turns"], 25)
+        self.assertEqual(metrics["active_producer_turns"], 0)
         self.replay()
 
     def test_concurrent_retries_and_stale_decisions(self):

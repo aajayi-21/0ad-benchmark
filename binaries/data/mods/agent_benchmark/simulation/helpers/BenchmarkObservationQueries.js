@@ -11,7 +11,7 @@ class BenchmarkObservationQueries
 			Object.keys(query).some(key => ![...common, ...fields[query.kind]].includes(key)))
 			return { "error": "invalid_query" };
 		// Up to 256 rows per page so the automatic first briefing page covers a grown base.
-		const limit = query.limit === undefined ? 32 : query.limit;
+		const limit = query.limit === undefined ? (query.kind == "entities" ? 64 : 32) : query.limit;
 		if (!Number.isInteger(limit) || limit < 1 || limit > 256)
 			return { "error": "invalid_query" };
 		const allEntities = [...view.own_entities, ...view.visible_entities, ...view.last_seen];

@@ -1,9 +1,11 @@
 """Versioned scenario manifests and their resolution to engine attributes."""
 
 import copy
-import hashlib
 import json
 from pathlib import Path
+
+from zero_ad_bench.engine import DEFAULT_ENGINE
+from zero_ad_bench.provenance import digest, mod_roots
 
 
 PHASE_ORDER = ("village", "town", "city")
@@ -66,6 +68,8 @@ class Scenario:
         self.objective.setdefault("params", {})
         self.objective.setdefault("stop_on_success", True)
         self.objective.setdefault("success", "")
+        self.objective.setdefault("timing", "decision_boundary_v1")
+        _require(self.objective["timing"] == "decision_boundary_v1", "Unsupported goal timing")
         self.victory_conditions = list(data.get("victory_conditions", []))
         self.trigger_scripts = list(data.get("trigger_scripts", []))
         self.mods = list(data.get("mods", ["agent_benchmark"]))
@@ -148,13 +152,26 @@ class Scenario:
             "settings": settings,
         }
 
-    def content_hashes(self, mod_sources):
-        """Hash declared assets from the given mod roots; unresolved assets are explicit."""
-        roots = [Path(p) for p in mod_sources.values()]
+    def content_hashes(self, mod_sources=None, engine=DEFAULT_ENGINE):
+        """Hash declared and directly loaded assets with the engine's mod override order."""
+        roots = list(reversed(mod_roots(self.mods, mod_sources, engine).values()))
+        map_assets = (
+            [self.map + ".js"]
+            if self.map_type == "random"
+            else [
+                self.map + ".xml",
+                self.map + ".pmp",
+            ]
+        )
+        assets = [
+            *self.assets,
+            *map_assets,
+            *("maps/" + script for script in self.resolved_trigger_scripts()),
+        ]
         hashes = {}
-        for asset in self.assets:
+        for asset in dict.fromkeys(assets):
             found = next((root / asset for root in roots if (root / asset).is_file()), None)
-            hashes[asset] = hashlib.sha256(found.read_bytes()).hexdigest() if found else None
+            hashes[asset] = digest(found)[0] if found else None
         return hashes
 
     def describe(self):
